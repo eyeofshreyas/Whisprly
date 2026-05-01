@@ -5,18 +5,18 @@ import "./overlay.css";
 
 type Status = "idle" | "recording" | "transcribing";
 
-const HEIGHTS = [3, 6, 11, 16, 20, 16, 10, 5, 3, 8, 14, 18];
+const HEIGHTS = [2, 5, 8, 12, 10, 7, 4, 2, 6, 10, 8, 5, 3, 9, 7, 4];
 
 function Waveform({ status }: { status: Status }) {
   return (
     <div className={`ov-waveform ov-waveform--${status}`}>
-      {Array.from({ length: 12 }).map((_, i) => (
+      {Array.from({ length: 16 }).map((_, i) => (
         <span
           key={i}
           className="ov-wave-bar"
           style={{
             "--base-h": `${HEIGHTS[i]}px`,
-            animationDelay: `${(i * 0.06).toFixed(3)}s`,
+            animationDelay: `${(i * 0.055).toFixed(3)}s`,
           } as React.CSSProperties}
         />
       ))}
@@ -34,18 +34,17 @@ export default function Overlay() {
     return () => { unsub.then((f) => f()); };
   }, []);
 
+  const handleClick = () => {
+    if (status === "recording") invoke("stop_recording").catch(() => {});
+  };
+
   return (
-    <div className={`ov-root ov-root--${status}`}>
+    <div
+      className={`ov-root ov-root--${status}`}
+      onClick={handleClick}
+      title={status === "recording" ? "Click to stop" : undefined}
+    >
       <Waveform status={status} />
-      {status === "recording" && (
-        <button
-          className="ov-stop"
-          onClick={() => invoke("stop_recording").catch(() => {})}
-          title="Stop"
-        >
-          <span className="ov-stop-icon" />
-        </button>
-      )}
     </div>
   );
 }
