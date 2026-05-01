@@ -1,0 +1,23 @@
+# env / secrets
+.env
+
+# Rust
+target/
+Cargo.lock
+
+# Node
+node_modules/
+dist/
+
+# Tauri generated
+src-tauri/gen/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+sidecar/__pycache__/
