@@ -43,17 +43,14 @@ pub fn record(stop: Arc<AtomicBool>) -> RecordingResult {
         match config.sample_format() {
             SampleFormat::F32 => device.build_input_stream(
                 &config.into(),
-                move |data: &[f32], _| {
-                    buf.lock().unwrap().extend_from_slice(data);
-                },
+                move |data: &[f32], _| { buf.lock().unwrap().extend_from_slice(data); },
                 err_fn,
                 None,
             ),
             SampleFormat::I16 => device.build_input_stream(
                 &config.into(),
                 move |data: &[i16], _| {
-                    let floats: Vec<f32> =
-                        data.iter().map(|&s| s as f32 / i16::MAX as f32).collect();
+                    let floats: Vec<f32> = data.iter().map(|&s| s as f32 / i16::MAX as f32).collect();
                     buf.lock().unwrap().extend(floats);
                 },
                 err_fn,
@@ -62,8 +59,7 @@ pub fn record(stop: Arc<AtomicBool>) -> RecordingResult {
             SampleFormat::U16 => device.build_input_stream(
                 &config.into(),
                 move |data: &[u16], _| {
-                    let floats: Vec<f32> = data
-                        .iter()
+                    let floats: Vec<f32> = data.iter()
                         .map(|&s| (s as f32 / u16::MAX as f32) * 2.0 - 1.0)
                         .collect();
                     buf.lock().unwrap().extend(floats);
@@ -74,8 +70,7 @@ pub fn record(stop: Arc<AtomicBool>) -> RecordingResult {
             SampleFormat::I32 => device.build_input_stream(
                 &config.into(),
                 move |data: &[i32], _| {
-                    let floats: Vec<f32> =
-                        data.iter().map(|&s| s as f32 / i32::MAX as f32).collect();
+                    let floats: Vec<f32> = data.iter().map(|&s| s as f32 / i32::MAX as f32).collect();
                     buf.lock().unwrap().extend(floats);
                 },
                 err_fn,
@@ -111,12 +106,43 @@ pub fn record(stop: Arc<AtomicBool>) -> RecordingResult {
     RecordingResult { samples: data, sample_rate, channels }
 }
 
+// Mix all channels down to mono.
+fn to_mono(samples: &[f32], channels: usize) -> Vec<f32> {
+    if channels == 1 {
+        return samples.to_vec();
+    }
+    samples.chunks(channels)
+        .map(|frame| frame.iter().sum::<f32>() / channels as f32)
+        .collect()
+}
+
+// Linear-interpolation resample to 16 kHz — good enough for voice.
+fn resample_to_16k(samples: &[f32], from_rate: u32) -> Vec<f32> {
+    if from_rate == 16000 {
+        return samples.to_vec();
+    }
+    let ratio = from_rate as f64 / 16000.0;
+    let out_len = (samples.len() as f64 / ratio).ceil() as usize;
+    (0..out_len).map(|i| {
+        let pos = i as f64 * ratio;
+        let idx = pos as usize;
+        let frac = (pos - idx as f64) as f32;
+        let a = samples.get(idx).copied().unwrap_or(0.0);
+        let b = samples.get(idx + 1).copied().unwrap_or(a);
+        a + (b - a) * frac
+    }).collect()
+}
+
+// Always returns 16 kHz mono WAV — what Whisper is trained on.
 pub fn to_wav(result: RecordingResult) -> Vec<u8> {
     use std::io::Cursor;
 
+    let mono = to_mono(&result.samples, result.channels as usize);
+    let resampled = resample_to_16k(&mono, result.sample_rate);
+
     let spec = hound::WavSpec {
-        channels: result.channels,
-        sample_rate: result.sample_rate,
+        channels: 1,
+        sample_rate: 16000,
         bits_per_sample: 16,
         sample_format: hound::SampleFormat::Int,
     };
@@ -125,7 +151,7 @@ pub fn to_wav(result: RecordingResult) -> Vec<u8> {
     {
         let cursor = Cursor::new(&mut buf);
         let mut writer = hound::WavWriter::new(cursor, spec).expect("WAV writer init failed");
-        for &s in &result.samples {
+        for &s in &resampled {
             let sample = (s * i16::MAX as f32).clamp(i16::MIN as f32, i16::MAX as f32) as i16;
             writer.write_sample(sample).expect("WAV write failed");
         }

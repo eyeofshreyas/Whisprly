@@ -1,3 +1,28 @@
+// Whisper hallucinates these phrases on silence or background noise.
+const HALLUCINATIONS: &[&str] = &[
+    "thank you for watching",
+    "thanks for watching",
+    "thank you for listening",
+    "please subscribe",
+    "like and subscribe",
+    "subtitles by",
+    "transcribed by",
+    "[music]",
+    "[applause]",
+    "[silence]",
+    "(silence)",
+    "...",
+];
+
+fn is_hallucination(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    let clean = lower.trim();
+    if clean.is_empty() || clean.chars().all(|c| !c.is_alphanumeric()) {
+        return true;
+    }
+    HALLUCINATIONS.iter().any(|h| clean.contains(h))
+}
+
 pub async fn groq(wav_bytes: &[u8], api_key: &str) -> Result<String, String> {
     let client = reqwest::Client::new();
 
@@ -9,6 +34,8 @@ pub async fn groq(wav_bytes: &[u8], api_key: &str) -> Result<String, String> {
     let form = reqwest::multipart::Form::new()
         .text("model", "whisper-large-v3-turbo")
         .text("response_format", "text")
+        // Biases Whisper toward proper punctuation and capitalisation.
+        .text("prompt", "Voice dictation. Transcribe with correct punctuation and capitalisation.")
         .part("file", file_part);
 
     let response = client
@@ -26,7 +53,13 @@ pub async fn groq(wav_bytes: &[u8], api_key: &str) -> Result<String, String> {
     }
 
     let text = response.text().await.map_err(|e| e.to_string())?;
-    Ok(text.trim().to_string())
+    let trimmed = text.trim().to_string();
+
+    if is_hallucination(&trimmed) {
+        return Err("hallucination".into());
+    }
+
+    Ok(trimmed)
 }
 
 pub async fn local(wav_bytes: &[u8], python_cmd: &str, sidecar_path: &str) -> Result<String, String> {
@@ -54,5 +87,10 @@ pub async fn local(wav_bytes: &[u8], python_cmd: &str, sidecar_path: &str) -> Re
     }
 
     let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+    if is_hallucination(&text) {
+        return Err("hallucination".into());
+    }
+
     Ok(text)
 }
