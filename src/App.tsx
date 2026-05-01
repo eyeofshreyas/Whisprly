@@ -1,3 +1,4 @@
+import "./index.css";
 import { useEffect, useState, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
@@ -20,6 +21,26 @@ interface Settings {
   pythonCmd: string;
 }
 
+const BAR_COUNT = 28;
+const HEIGHTS = [3, 6, 10, 16, 22, 18, 12, 7, 4, 8, 14, 20, 24, 18, 10, 6, 3, 7, 13, 20, 22, 16, 9, 5, 3, 8, 15, 10];
+
+function Waveform({ status }: { status: Status }) {
+  return (
+    <div className={`waveform waveform--${status}`}>
+      {Array.from({ length: BAR_COUNT }).map((_, i) => (
+        <span
+          key={i}
+          className="wave-bar"
+          style={{
+            "--base-h": `${HEIGHTS[i % HEIGHTS.length]}px`,
+            animationDelay: `${(i * 0.045).toFixed(3)}s`,
+          } as React.CSSProperties}
+        />
+      ))}
+    </div>
+  );
+}
+
 export default function App() {
   const [status, setStatus] = useState<Status>("idle");
   const [statusMsg, setStatusMsg] = useState("");
@@ -36,11 +57,9 @@ export default function App() {
       setStatus(e.payload.status);
       setStatusMsg(e.payload.message ?? "");
     });
-
     const unTranscript = listen<TranscriptEntry>("transcript", (e) => {
       setTranscripts((prev) => [e.payload, ...prev].slice(0, 50));
     });
-
     return () => {
       unStatus.then((f) => f());
       unTranscript.then((f) => f());
@@ -48,35 +67,24 @@ export default function App() {
   }, []);
 
   const saveSettings = useCallback(async () => {
-    await invoke("save_settings", {
-      groqApiKey: settings.groqApiKey,
-      pythonCmd: settings.pythonCmd,
-    });
+    await invoke("save_settings", { groqApiKey: settings.groqApiKey, pythonCmd: settings.pythonCmd });
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   }, [settings]);
 
-  const dot = { idle: "#6b7280", recording: "#ef4444", transcribing: "#f59e0b" }[status];
-  const label = { idle: "Idle", recording: "Recording...", transcribing: "Transcribing..." }[status];
+  const statusLabel = { idle: "Hold Ctrl + Win to speak", recording: "Listening...", transcribing: "Transcribing..." }[status];
 
   return (
     <div className="app">
       <header>
-        <h1>WisperFlow</h1>
-        <button className="icon-btn" onClick={() => setShowSettings((v) => !v)} title="Settings">
-          {showSettings ? "✕" : "⚙"}
-        </button>
+        <span className="logo">WisperFlow</span>
+        <div className="header-right">
+          <span className="lang-badge">EN · HI</span>
+          <button className="icon-btn" onClick={() => setShowSettings((v) => !v)} title="Settings">
+            {showSettings ? "✕" : "⚙"}
+          </button>
+        </div>
       </header>
-
-      <div className="status-bar">
-        <span className="dot" style={{ background: dot }} />
-        <span className="status-label">{label}</span>
-        {statusMsg && <span className="status-msg">{statusMsg}</span>}
-      </div>
-
-      <p className="hint">
-        Hold <kbd>Ctrl</kbd> + <kbd>Win</kbd> to dictate
-      </p>
 
       {showSettings && (
         <div className="panel">
@@ -104,9 +112,8 @@ export default function App() {
       )}
 
       <div className="transcripts">
-        <h2>Recent Transcripts</h2>
         {transcripts.length === 0 ? (
-          <p className="empty">No transcripts yet — start dictating!</p>
+          <p className="empty">No transcripts yet</p>
         ) : (
           transcripts.map((t, i) => (
             <div key={i} className="entry">
@@ -118,6 +125,15 @@ export default function App() {
             </div>
           ))
         )}
+      </div>
+
+      <div className="bottom-bar">
+        <div className={`recorder-pill recorder-pill--${status}`}>
+          <Waveform status={status} />
+        </div>
+        <p className="status-label">
+          {statusMsg || statusLabel}
+        </p>
       </div>
     </div>
   );

@@ -1,7 +1,7 @@
 {
   "identifier": "default",
   "description": "Default capability for WisperFlow",
-  "windows": ["main"],
+  "windows": ["main", "overlay"],
   "permissions": [
     "core:default"
   ]

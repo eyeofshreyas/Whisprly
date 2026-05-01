@@ -1,10 +1,15 @@
-import React from "react";
+import React, { lazy, Suspense } from "react";
 import ReactDOM from "react-dom/client";
-import App from "./App";
-import "./index.css";
+
+const isOverlay = new URLSearchParams(window.location.search).get("window") === "overlay";
+
+const App = lazy(() => import("./App"));
+const Overlay = lazy(() => import("./Overlay"));
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    <App />
+    <Suspense fallback={null}>
+      {isOverlay ? <Overlay /> : <App />}
+    </Suspense>
   </React.StrictMode>
 );

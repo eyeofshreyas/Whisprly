@@ -12,11 +12,25 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "WisperFlow",
         "width": 480,
         "height": 680,
         "resizable": true,
         "decorations": true
+      },
+      {
+        "label": "overlay",
+        "title": "",
+        "url": "/?window=overlay",
+        "width": 340,
+        "height": 72,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "resizable": false
       }
     ],
     "security": {
@@ -26,6 +40,9 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": []
+    "icon": [
+      "icons/icon.ico",
+      "icons/icon.png"
+    ]
   }
 }

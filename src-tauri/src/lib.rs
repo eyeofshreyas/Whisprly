@@ -3,7 +3,10 @@ use std::sync::{
     Arc, Mutex,
 };
 use serde::{Deserialize, Serialize};
-use tauri::Manager;
+use tauri::{AppHandle, Emitter, Manager};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::WindowEvent;
 
 mod audio;
 mod auto_type;
@@ -52,7 +55,7 @@ fn start_recording() -> RecordingHandle {
     RecordingHandle { stop_flag, thread }
 }
 
-fn emit_status(app: &tauri::AppHandle, status: &str, message: Option<String>) {
+fn emit_status(app: &AppHandle, status: &str, message: Option<String>) {
     app.emit(
         "status",
         StatusPayload { status: status.to_string(), message },
@@ -60,9 +63,32 @@ fn emit_status(app: &tauri::AppHandle, status: &str, message: Option<String>) {
     .ok();
 }
 
+fn show_overlay(app: &AppHandle) {
+    if let Some(ov) = app.get_webview_window("overlay") {
+        if let Ok(Some(mon)) = ov.primary_monitor() {
+            let wa = mon.work_area();
+            let scale = mon.scale_factor();
+            let ow = (340.0 * scale) as i32;
+            let oh = (72.0 * scale) as i32;
+            let margin = (48.0 * scale) as i32;
+            let x = wa.position.x + (wa.size.width as i32 - ow) / 2;
+            let y = wa.position.y + wa.size.height as i32 - oh - margin;
+            let _ = ov.set_position(tauri::PhysicalPosition::new(x, y));
+        }
+        let _ = ov.show();
+        let _ = ov.set_always_on_top(true);
+    }
+}
+
+fn hide_overlay(app: &AppHandle) {
+    if let Some(ov) = app.get_webview_window("overlay") {
+        let _ = ov.hide();
+    }
+}
+
 async fn coordinator(
     mut rx: tokio::sync::mpsc::UnboundedReceiver<HotkeyEvent>,
-    app: tauri::AppHandle,
+    app: AppHandle,
     settings: Arc<Mutex<AppSettings>>,
     log: Arc<Mutex<Vec<TranscriptEntry>>>,
 ) {
@@ -72,6 +98,7 @@ async fn coordinator(
         match event {
             HotkeyEvent::Start => {
                 if recording.is_none() {
+                    show_overlay(&app);
                     emit_status(&app, "recording", None);
                     recording = Some(start_recording());
                 }
@@ -89,13 +116,13 @@ async fn coordinator(
 
                     if result.samples.is_empty() {
                         emit_status(&app, "idle", Some("No audio captured".into()));
+                        hide_overlay(&app);
                         continue;
                     }
 
                     let wav = audio::to_wav(result);
                     let s = settings.lock().unwrap().clone();
 
-                    // Try Groq first
                     let transcript = if !s.groq_api_key.is_empty() {
                         match transcribe::groq(&wav, &s.groq_api_key).await {
                             Ok(t) => Some(("groq", t)),
@@ -108,7 +135,6 @@ async fn coordinator(
                         None
                     };
 
-                    // Fall back to local faster-whisper
                     let transcript = if transcript.is_none() {
                         match transcribe::local(&wav, &s.python_cmd, &s.sidecar_path).await {
                             Ok(t) => Some(("local", t)),
@@ -123,7 +149,6 @@ async fn coordinator(
 
                     match transcript {
                         Some((engine, text)) if !text.is_empty() => {
-                            // Auto-type into focused window
                             let t = text.clone();
                             tokio::task::spawn_blocking(move || auto_type::type_text(&t))
                                 .await
@@ -140,9 +165,11 @@ async fn coordinator(
                             log.lock().unwrap().push(entry.clone());
                             app.emit("transcript", entry).ok();
                             emit_status(&app, "idle", None);
+                            hide_overlay(&app);
                         }
                         _ => {
                             emit_status(&app, "idle", Some("Nothing transcribed".into()));
+                            hide_overlay(&app);
                         }
                     }
                 }
@@ -186,7 +213,6 @@ pub fn run() {
     let groq_api_key = std::env::var("GROQ_API").unwrap_or_default();
     let python_cmd = if cfg!(windows) { "python".to_string() } else { "python3".to_string() };
 
-    // Sidecar path: look next to the binary, then fall back to project-relative
     let sidecar_path = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|d| d.join("sidecar").join("whisper_sidecar.py")))
@@ -206,11 +232,59 @@ pub fn run() {
             let app_handle = app.handle().clone();
             let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<HotkeyEvent>();
 
-            // Keyboard listener (blocking — needs its own OS thread)
             std::thread::spawn(move || hotkey::start_listener(tx));
+            tauri::async_runtime::spawn(coordinator(rx, app_handle.clone(), settings, transcript_log));
 
-            // Coordinator (async task)
-            tauri::async_runtime::spawn(coordinator(rx, app_handle, settings, transcript_log));
+            // ── System tray ──
+            let open_i = MenuItem::with_id(app, "open", "Open WisperFlow", true, None::<&str>)?;
+            let sep    = PredefinedMenuItem::separator(app)?;
+            let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+            let menu   = Menu::with_items(app, &[&open_i, &sep, &quit_i])?;
+
+            TrayIconBuilder::new()
+                .icon(app.default_window_icon().unwrap().clone())
+                .menu(&menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "open" => {
+                        if let Some(w) = app.get_webview_window("main") {
+                            let _ = w.show();
+                            let _ = w.set_focus();
+                        }
+                    }
+                    "quit" => app.exit(0),
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        let app = tray.app_handle();
+                        if let Some(w) = app.get_webview_window("main") {
+                            if w.is_visible().unwrap_or(false) {
+                                let _ = w.set_focus();
+                            } else {
+                                let _ = w.show();
+                                let _ = w.set_focus();
+                            }
+                        }
+                    }
+                })
+                .build(app)?;
+
+            // ── Close-to-tray: intercept CloseRequested on main window ──
+            let ah = app_handle.clone();
+            app.get_webview_window("main").unwrap().on_window_event(move |event| {
+                if let WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    if let Some(w) = ah.get_webview_window("main") {
+                        let _ = w.hide();
+                    }
+                }
+            });
 
             Ok(())
         })
