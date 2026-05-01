@@ -1,6 +1,9 @@
 # env / secrets
 .env
 
+# Claude Code local settings
+.claude/
+
 # Rust
 target/
 Cargo.lock
