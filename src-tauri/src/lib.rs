@@ -69,8 +69,8 @@ fn show_overlay(app: &AppHandle) {
         if let Ok(Some(mon)) = ov.primary_monitor() {
             let wa = mon.work_area();
             let scale = mon.scale_factor();
-            let ow = (300.0 * scale) as i32;
-            let oh = (52.0 * scale) as i32;
+            let ow = (100.0 * scale) as i32;
+            let oh = (50.0 * scale) as i32;
             let margin = (48.0 * scale) as i32;
             let x = wa.position.x + (wa.size.width as i32 - ow) / 2;
             let y = wa.position.y + wa.size.height as i32 - oh - margin;
