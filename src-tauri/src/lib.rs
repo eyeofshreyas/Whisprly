@@ -41,6 +41,7 @@ pub struct AppSettings {
 pub struct AppState {
     pub settings: Arc<Mutex<AppSettings>>,
     pub transcript_log: Arc<Mutex<Vec<TranscriptEntry>>>,
+    pub hotkey_tx: tokio::sync::mpsc::UnboundedSender<HotkeyEvent>,
 }
 
 struct RecordingHandle {
@@ -68,8 +69,8 @@ fn show_overlay(app: &AppHandle) {
         if let Ok(Some(mon)) = ov.primary_monitor() {
             let wa = mon.work_area();
             let scale = mon.scale_factor();
-            let ow = (340.0 * scale) as i32;
-            let oh = (72.0 * scale) as i32;
+            let ow = (300.0 * scale) as i32;
+            let oh = (52.0 * scale) as i32;
             let margin = (48.0 * scale) as i32;
             let x = wa.position.x + (wa.size.width as i32 - ow) / 2;
             let y = wa.position.y + wa.size.height as i32 - oh - margin;
@@ -179,6 +180,11 @@ async fn coordinator(
 }
 
 #[tauri::command]
+async fn stop_recording(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    state.hotkey_tx.send(HotkeyEvent::Stop).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn save_settings(
     state: tauri::State<'_, AppState>,
     groq_api_key: String,
@@ -224,13 +230,16 @@ pub fn run() {
     let transcript_log = Arc::new(Mutex::new(Vec::<TranscriptEntry>::new()));
 
     tauri::Builder::default()
-        .manage(AppState {
-            settings: settings.clone(),
-            transcript_log: transcript_log.clone(),
-        })
         .setup(|app| {
             let app_handle = app.handle().clone();
             let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<HotkeyEvent>();
+            let cmd_tx = tx.clone();
+
+            app.manage(AppState {
+                settings: settings.clone(),
+                transcript_log: transcript_log.clone(),
+                hotkey_tx: cmd_tx,
+            });
 
             std::thread::spawn(move || hotkey::start_listener(tx));
             tauri::async_runtime::spawn(coordinator(rx, app_handle.clone(), settings, transcript_log));
@@ -292,6 +301,7 @@ pub fn run() {
             save_settings,
             get_settings,
             get_transcript_log,
+            stop_recording,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
