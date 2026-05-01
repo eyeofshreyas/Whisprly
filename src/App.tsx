@@ -72,7 +72,11 @@ export default function App() {
     setTimeout(() => setSaved(false), 2000);
   }, [settings]);
 
-  const statusLabel = { idle: "Hold Ctrl + Win to speak", recording: "Listening...", transcribing: "Transcribing..." }[status];
+  const statusLabel = {
+    idle: "Hold Ctrl + Win to speak",
+    recording: "Recording...",
+    transcribing: "Transcribing...",
+  }[status];
 
   return (
     <div className="app">
@@ -113,12 +117,16 @@ export default function App() {
 
       <div className="transcripts">
         {transcripts.length === 0 ? (
-          <p className="empty">No transcripts yet</p>
+          <div className="empty-state">
+            <div className="empty-icon">🎙</div>
+            <span className="empty-label">No transcripts yet</span>
+            <span className="empty-hint">Hold Ctrl + Win to start</span>
+          </div>
         ) : (
           transcripts.map((t, i) => (
             <div key={i} className="entry">
               <div className="entry-meta">
-                <span className="badge">{t.engine}</span>
+                <span className={`badge badge--${t.engine}`}>{t.engine}</span>
                 <span className="time">{new Date(t.timestamp * 1000).toLocaleTimeString()}</span>
               </div>
               <p className="entry-text">{t.text}</p>
@@ -131,7 +139,7 @@ export default function App() {
         <div className={`recorder-pill recorder-pill--${status}`}>
           <Waveform status={status} />
         </div>
-        <p className="status-label">
+        <p className={`status-label status-label--${status}`}>
           {statusMsg || statusLabel}
         </p>
       </div>
