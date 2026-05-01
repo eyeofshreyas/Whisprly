@@ -77,7 +77,7 @@ export default function App() {
   return (
     <div className="app">
       <header>
-        <span className="logo">WisperFlow</span>
+        <span className="logo">Whisprly</span>
         <div className="header-right">
           <span className="lang-badge">EN · HI</span>
           <button className="icon-btn" onClick={() => setShowSettings((v) => !v)} title="Settings">

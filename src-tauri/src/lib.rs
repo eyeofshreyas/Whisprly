@@ -236,7 +236,7 @@ pub fn run() {
             tauri::async_runtime::spawn(coordinator(rx, app_handle.clone(), settings, transcript_log));
 
             // ── System tray ──
-            let open_i = MenuItem::with_id(app, "open", "Open WisperFlow", true, None::<&str>)?;
+            let open_i = MenuItem::with_id(app, "open", "Open Whisprly", true, None::<&str>)?;
             let sep    = PredefinedMenuItem::separator(app)?;
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu   = Menu::with_items(app, &[&open_i, &sep, &quit_i])?;

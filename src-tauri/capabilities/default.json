@@ -1,6 +1,6 @@
 {
   "identifier": "default",
-  "description": "Default capability for WisperFlow",
+  "description": "Default capability for Whisprly",
   "windows": ["main", "overlay"],
   "permissions": [
     "core:default"

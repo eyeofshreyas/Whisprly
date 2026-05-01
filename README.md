@@ -1,6 +1,6 @@
-# WisperFlow
+# Whisprly
 
-WisperFlow is a modern desktop application built with Tauri, React, Vite, and TypeScript.
+Whisprly is a modern desktop application built with Tauri, React, Vite, and TypeScript.
 
 ## Getting Started
 

@@ -1,11 +1,11 @@
 [package]
-name = "wisperflow"
+name = "whisprly"
 version = "0.1.0"
-description = "WisperFlow — Personal Dictation App"
+description = "Whisprly — Personal Dictation App"
 edition = "2021"
 
 [lib]
-name = "wisperflow_lib"
+name = "whisprly_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

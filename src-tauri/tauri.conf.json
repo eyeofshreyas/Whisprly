@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "WisperFlow",
+  "productName": "Whisprly",
   "version": "0.1.0",
-  "identifier": "com.wisperflow.app",
+  "identifier": "com.whisprly.app",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "WisperFlow",
+        "title": "Whisprly",
         "width": 480,
         "height": 680,
         "resizable": true,

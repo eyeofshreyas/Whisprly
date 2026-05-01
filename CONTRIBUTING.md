@@ -1,6 +1,6 @@
-# Contributing to WisperFlow
+# Contributing to Whisprly
 
-First off, thank you for considering contributing to WisperFlow! It's people like you that make this tool great.
+First off, thank you for considering contributing to Whisprly! It's people like you that make this tool great.
 
 ## Where do I go from here?
 
@@ -8,7 +8,7 @@ If you've noticed a bug or have a feature request, make sure to check our Issues
 
 ## Fork & create a branch
 
-If this is something you think you can fix, then fork WisperFlow and create a branch with a descriptive name.
+If this is something you think you can fix, then fork Whisprly and create a branch with a descriptive name.
 
 ## Get the test suite running
 

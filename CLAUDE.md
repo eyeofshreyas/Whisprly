@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## What is WisperFlow
+## What is Whisprly
 
 A Tauri v2 desktop dictation app (Windows-first). Hold **Ctrl + Win** to record audio, release to transcribe. The transcript is auto-typed into whatever window was focused, and also appended to the in-app log. Transcription uses Groq (cloud, `whisper-large-v3-turbo`) with a local Python/faster-whisper fallback.
 
