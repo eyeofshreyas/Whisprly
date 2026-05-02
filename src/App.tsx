@@ -279,6 +279,7 @@ export default function App() {
 
       {/* ── Main content ── */}
       <main className="content">
+        <div key={showSettings ? "settings" : "home"} className="content-page">
         {showSettings ? (
           <div className="settings-page">
             <div className="page-header">
@@ -286,27 +287,33 @@ export default function App() {
               <button className="close-btn" onClick={() => setShowSettings(false)} aria-label="Close settings">✕</button>
             </div>
             <div className="settings-form">
-              <div className="field-group">
-                <label className="field-label">Groq API Key</label>
-                <input
-                  type="password"
-                  className="field-input"
-                  value={settings.groqApiKey}
-                  onChange={(e) => setSettings((s) => ({ ...s, groqApiKey: e.target.value }))}
-                  placeholder="gsk_..."
-                />
-                <span className="field-hint">Fast cloud transcription via Groq Whisper</span>
+              <div className="settings-section">
+                <p className="settings-section-title">Cloud Transcription</p>
+                <div className="field-group">
+                  <label className="field-label">Groq API Key</label>
+                  <input
+                    type="password"
+                    className="field-input"
+                    value={settings.groqApiKey}
+                    onChange={(e) => setSettings((s) => ({ ...s, groqApiKey: e.target.value }))}
+                    placeholder="gsk_..."
+                  />
+                  <span className="field-hint">Fast cloud transcription via Groq Whisper</span>
+                </div>
               </div>
-              <div className="field-group">
-                <label className="field-label">Python command</label>
-                <input
-                  type="text"
-                  className="field-input"
-                  value={settings.pythonCmd}
-                  onChange={(e) => setSettings((s) => ({ ...s, pythonCmd: e.target.value }))}
-                  placeholder="python"
-                />
-                <span className="field-hint">Local Whisper fallback</span>
+              <div className="settings-section">
+                <p className="settings-section-title">Local Fallback</p>
+                <div className="field-group">
+                  <label className="field-label">Python command</label>
+                  <input
+                    type="text"
+                    className="field-input"
+                    value={settings.pythonCmd}
+                    onChange={(e) => setSettings((s) => ({ ...s, pythonCmd: e.target.value }))}
+                    placeholder="python"
+                  />
+                  <span className="field-hint">Used when Groq key is absent or fails</span>
+                </div>
               </div>
               <button className="save-btn" onClick={saveSettings}>
                 {saved ? "Saved ✓" : "Save settings"}
@@ -380,6 +387,7 @@ export default function App() {
                         <div
                           key={key}
                           className={`entry${copied ? " entry--copied" : ""}`}
+                          style={{ "--entry-index": Math.min(i, 5) } as React.CSSProperties}
                           onClick={() => copyEntry(t.text, key)}
                           title="Click to copy"
                         >
@@ -402,6 +410,7 @@ export default function App() {
             </div>
           </>
         )}
+        </div>
       </main>
     </div>
   );

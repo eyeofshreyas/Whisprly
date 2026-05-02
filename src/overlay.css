@@ -1,4 +1,4 @@
-* { margin: 0; padding: 0; box-sizing: border-box; }
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
 html, body {
   background: transparent !important;
@@ -12,67 +12,132 @@ html, body {
   width: 100vw;
   height: 100vh;
   background: transparent;
-}
-
-.ov-root {
-  width: 100%;
-  height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(14, 14, 14, 0.96);
-  border-radius: 13px;
-  padding: 0 10px;
-  border: 1px solid #252525;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
-  transition: border-color 0.25s, box-shadow 0.25s;
+}
+
+/* ── Pill shell ──────────────────────────────────────────────────────────────── */
+.ov-root {
+  width: calc(100% - 16px);
+  height: calc(100% - 16px);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 20px;
+  background: rgba(12, 10, 20, 0.93);
+  backdrop-filter: blur(20px) saturate(1.5);
+  -webkit-backdrop-filter: blur(20px) saturate(1.5);
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.65),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  transition: border-color 0.25s ease-out, box-shadow 0.25s ease-out;
   cursor: default;
 }
 
 .ov-root--recording {
-  border-color: rgba(239, 68, 68, 0.4);
-  box-shadow: 0 0 12px rgba(239, 68, 68, 0.22), 0 2px 12px rgba(0, 0, 0, 0.5);
+  border-color: rgba(255, 68, 68, 0.38);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.65),
+    0 0 24px rgba(255, 68, 68, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
   cursor: pointer;
 }
 
 .ov-root--transcribing {
-  border-color: rgba(245, 158, 11, 0.35);
-  box-shadow: 0 0 10px rgba(245, 158, 11, 0.2), 0 2px 12px rgba(0, 0, 0, 0.5);
+  border-color: rgba(245, 158, 11, 0.32);
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.65),
+    0 0 20px rgba(245, 158, 11, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
-/* ── Waveform ── */
+/* ── Left section: dot + label ───────────────────────────────────────────────── */
+.ov-left {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-shrink: 0;
+}
+
+.ov-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: #555;
+}
+
+.ov-root--recording  .ov-dot {
+  background: #ff4444;
+  box-shadow: 0 0 6px rgba(255, 68, 68, 0.6);
+  animation: ov-dot-pulse 1s ease-in-out infinite;
+}
+
+.ov-root--transcribing .ov-dot {
+  background: #f59e0b;
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.5);
+  animation: ov-dot-pulse 1.3s ease-in-out infinite;
+}
+
+@keyframes ov-dot-pulse {
+  0%, 100% { opacity: 1;    transform: scale(1); }
+  50%       { opacity: 0.55; transform: scale(0.75); }
+}
+
+.ov-label {
+  font-family: "Segoe UI Variable", "Segoe UI", -apple-system, sans-serif;
+  font-size: 0.76rem;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.45);
+  white-space: nowrap;
+  letter-spacing: 0.01em;
+}
+
+/* ── Right section: waveform ─────────────────────────────────────────────────── */
 .ov-waveform {
   display: flex;
   align-items: center;
-  gap: 2px;
-  height: 14px;
+  gap: 2.5px;
+  height: 26px;
+  flex: 1;
 }
 
 .ov-wave-bar {
   display: block;
-  width: 2px;
-  height: var(--base-h, 2px);
-  border-radius: 1px;
-  background: #2e2e2e;
+  flex: 1;
+  min-width: 2px;
+  max-width: 4px;
+  height: var(--base-h, 3px);
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  transform-origin: center;
 }
 
 .ov-waveform--recording .ov-wave-bar {
-  background: #ef4444;
+  background: #6c47ff;
   animation: ov-bounce 0.5s ease-in-out infinite alternate;
-}
-
-@keyframes ov-bounce {
-  from { height: 2px; }
-  to   { height: var(--base-h, 12px); }
 }
 
 .ov-waveform--transcribing .ov-wave-bar {
   background: #f59e0b;
-  height: 3px !important;
-  animation: ov-pulse 1s ease-in-out infinite alternate;
+  animation: ov-pulse 0.88s ease-in-out infinite alternate;
+}
+
+@keyframes ov-bounce {
+  from { height: 2px; opacity: 0.6; }
+  to   { height: var(--base-h, 14px); opacity: 1; }
 }
 
 @keyframes ov-pulse {
-  from { opacity: 0.35; transform: scaleY(0.5); }
-  to   { opacity: 1;    transform: scaleY(1.4); }
+  from { transform: scaleY(0.18); opacity: 0.45; }
+  to   { transform: scaleY(1);    opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ov-wave-bar,
+  .ov-dot { animation: none; }
+  .ov-root { transition: none; }
 }

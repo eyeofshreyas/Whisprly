@@ -384,6 +384,13 @@ kbd {
     border-color var(--transition-fast),
     background  var(--transition-fast),
     box-shadow  var(--transition-fast);
+  animation: card-in 280ms ease-out both;
+  animation-delay: calc(var(--entry-index, 0) * 45ms);
+}
+
+@keyframes card-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 .entry:hover {
@@ -509,6 +516,20 @@ kbd {
   color: var(--text-4);
 }
 
+/* ── Page transition ─────────────────────────────────────────────────────────── */
+.content-page {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: page-in 200ms ease-out both;
+}
+
+@keyframes page-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
 /* ── Settings page ───────────────────────────────────────────────────────────── */
 .settings-page {
   display: flex;
@@ -549,7 +570,26 @@ kbd {
 
 .close-btn:hover { border-color: var(--text-3); color: var(--text-0); }
 
-.settings-form { display: flex; flex-direction: column; gap: 18px; }
+/* Settings section cards */
+.settings-section {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.settings-section-title {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.settings-form { display: flex; flex-direction: column; gap: 12px; }
 
 .field-group { display: flex; flex-direction: column; gap: 6px; }
 
@@ -608,6 +648,8 @@ kbd {
   .status-ring--transcribing { animation: none; }
   .wave-pill,
   .entry { transition: none; }
+  .entry,
+  .content-page { animation: none; }
 }
 
 /* ── Scrollbar ───────────────────────────────────────────────────────────────── */
