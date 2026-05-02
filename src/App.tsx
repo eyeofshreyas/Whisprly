@@ -238,26 +238,25 @@ export default function App() {
         <div className="sidebar-top">
           <div className="brand">
             <svg className="brand-logo" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <rect width="32" height="32" rx="7" fill="#7c3aed" />
+              <rect width="32" height="32" rx="7" fill="#6c47ff" />
               <rect x="11.5" y="6" width="9" height="14" rx="4.5" fill="white" />
               <path d="M7.5 16c0 4.694 3.806 8.5 8.5 8.5s8.5-3.806 8.5-8.5" stroke="white" strokeWidth="1.9" strokeLinecap="round" fill="none" />
               <line x1="16" y1="24.5" x2="16" y2="27.5" stroke="white" strokeWidth="1.9" strokeLinecap="round" />
               <line x1="11.5" y1="27.5" x2="20.5" y2="27.5" stroke="white" strokeWidth="1.9" strokeLinecap="round" />
             </svg>
-            <span className="brand-name">Whisprly</span>
-            <span className="pro-badge">PRO</span>
           </div>
 
           <nav className="nav">
             {NAV_ITEMS.map(({ id, Icon, label }) => (
               <button
                 key={id}
+                data-label={label}
+                aria-label={label}
                 className={`nav-item${activeNav === id ? " nav-item--active" : ""}`}
                 onClick={() => setActiveNav(id)}
                 aria-current={activeNav === id ? "page" : undefined}
               >
                 <Icon />
-                <span className="nav-label">{label}</span>
               </button>
             ))}
           </nav>
@@ -266,15 +265,14 @@ export default function App() {
         <div className="sidebar-bottom">
           <button
             className="sidebar-util"
+            data-label="Settings"
+            aria-label="Settings"
             onClick={() => { setActiveNav("home"); setShowSettings(true); }}
-            aria-label="Open settings"
           >
             <IcSettings />
-            <span className="nav-label">Settings</span>
           </button>
-          <button className="sidebar-util" aria-label="Help">
+          <button className="sidebar-util" data-label="Help" aria-label="Help">
             <IcHelp />
-            <span className="nav-label">Help</span>
           </button>
         </div>
       </aside>
