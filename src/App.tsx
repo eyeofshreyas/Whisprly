@@ -122,6 +122,33 @@ function IcCheck() {
   );
 }
 
+function IcBell() {
+  return (
+    <svg {...svgBase}>
+      <path d="M13.5 13.5H2.5l1.5-1.5V7.5A4 4 0 0 1 12 7.5V12l1.5 1.5z" />
+      <path d="M6.2 13.5a1.9 1.9 0 0 0 3.6 0" />
+    </svg>
+  );
+}
+
+function IcMic() {
+  return (
+    <svg {...svgBase}>
+      <rect x="6" y="1.5" width="4" height="8" rx="2" />
+      <path d="M3.5 7a4.5 4.5 0 0 0 9 0" />
+      <line x1="8" y1="13" x2="8" y2="15.5" />
+      <line x1="5.5" y1="15.5" x2="10.5" y2="15.5" />
+    </svg>
+  );
+}
+
+function getGreeting(): string {
+  const h = new Date().getHours();
+  if (h < 12) return "Good morning ☀️";
+  if (h < 17) return "Good afternoon 👋";
+  return "Good evening 🌙";
+}
+
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 const MiniWaveform = memo(function MiniWaveform({ status }: { status: Status }) {
@@ -238,20 +265,23 @@ export default function App() {
       <aside className="sidebar">
         <div className="sidebar-top">
           <div className="brand">
-            <img src={logo} className="brand-logo" alt="Whisprly" />
+            <div className="brand-icon">
+              <img src={logo} className="brand-logo" alt="" />
+            </div>
+            <span className="brand-name">Whisprly</span>
           </div>
 
           <nav className="nav">
             {NAV_ITEMS.map(({ id, Icon, label }) => (
               <button
                 key={id}
-                data-label={label}
                 aria-label={label}
                 className={`nav-item${activeNav === id ? " nav-item--active" : ""}`}
                 onClick={() => setActiveNav(id)}
                 aria-current={activeNav === id ? "page" : undefined}
               >
                 <Icon />
+                <span className="nav-label">{label}</span>
               </button>
             ))}
           </nav>
@@ -260,15 +290,23 @@ export default function App() {
         <div className="sidebar-bottom">
           <button
             className="sidebar-util"
-            data-label="Settings"
             aria-label="Settings"
             onClick={() => { setActiveNav("home"); setShowSettings(true); }}
           >
             <IcSettings />
+            <span className="nav-label">Settings</span>
           </button>
-          <button className="sidebar-util" data-label="Help" aria-label="Help">
+          <button className="sidebar-util" aria-label="Help">
             <IcHelp />
+            <span className="nav-label">Help</span>
           </button>
+          <div className="sidebar-user">
+            <div className="user-avatar">S</div>
+            <div className="user-info">
+              <p className="user-name">Shreyas</p>
+              <p className="user-plan">Pro Plan</p>
+            </div>
+          </div>
         </div>
       </aside>
 
@@ -319,18 +357,29 @@ export default function App() {
           <>
             {/* Header */}
             <div className="content-header">
-              <h1 className="welcome">Welcome back</h1>
+              <div className="header-row">
+                <div>
+                  <p className="header-greeting">{getGreeting()}</p>
+                  <h1 className="welcome">Welcome back, Shreyas</h1>
+                </div>
+                <div className="header-actions">
+                  <button className="header-action-btn" aria-label="Notifications">
+                    <IcBell />
+                  </button>
+                  <div className="header-avatar-btn">S</div>
+                </div>
+              </div>
               <p className="subtitle">Hold <kbd>Ctrl</kbd> + <kbd>Win</kbd> to dictate</p>
             </div>
 
             {/* Stats */}
             <div className="stats-row">
               <div className="stat-card">
-                <span className="stat-value">{days}</span>
+                <span className="stat-value stat-value--cyan">{days}</span>
                 <span className="stat-label">{days === 1 ? "day" : "days"} active</span>
               </div>
               <div className="stat-card">
-                <span className="stat-value">{formatWords(words)}</span>
+                <span className="stat-value stat-value--green">{formatWords(words)}</span>
                 <span className="stat-label">words dictated</span>
               </div>
               <div className="stat-card">
