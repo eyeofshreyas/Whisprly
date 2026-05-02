@@ -1,4 +1,5 @@
 import "./index.css";
+import logo from "./assets/logo.png";
 import { memo, useEffect, useState, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
@@ -237,13 +238,7 @@ export default function App() {
       <aside className="sidebar">
         <div className="sidebar-top">
           <div className="brand">
-            <svg className="brand-logo" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <rect width="32" height="32" rx="7" fill="#6c47ff" />
-              <rect x="11.5" y="6" width="9" height="14" rx="4.5" fill="white" />
-              <path d="M7.5 16c0 4.694 3.806 8.5 8.5 8.5s8.5-3.806 8.5-8.5" stroke="white" strokeWidth="1.9" strokeLinecap="round" fill="none" />
-              <line x1="16" y1="24.5" x2="16" y2="27.5" stroke="white" strokeWidth="1.9" strokeLinecap="round" />
-              <line x1="11.5" y1="27.5" x2="20.5" y2="27.5" stroke="white" strokeWidth="1.9" strokeLinecap="round" />
-            </svg>
+            <img src={logo} className="brand-logo" alt="Whisprly" />
           </div>
 
           <nav className="nav">
