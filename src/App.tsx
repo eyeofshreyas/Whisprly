@@ -3,6 +3,14 @@ import logo from "./assets/logo.png";
 import { memo, useEffect, useState, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
+import { onAuthChange, signOutUser, type User } from "./auth";
+import {
+  saveSettings as saveSettings_fs,
+  loadSettings,
+  saveTranscript,
+  loadTranscripts,
+} from "./firestore";
+import LoginScreen from "./LoginScreen";
 
 type Status = "idle" | "recording" | "transcribing";
 
@@ -249,29 +257,74 @@ export default function App() {
   const [activeNav, setActiveNav]   = useState("home");
   const [copiedKey, setCopiedKey]   = useState<string | null>(null);
   const [lightMode, setLightMode]   = useState(false);
+  const [user, setUser]           = useState<User | null>(null);
+  const [authReady, setAuthReady] = useState(false);
 
   useEffect(() => {
-    invoke<TranscriptEntry[]>("get_transcript_log").then(setTranscripts).catch(() => {});
-    invoke<Settings>("get_settings").then(setSettings).catch(() => {});
-
     const unStatus = listen<StatusPayload>("status", (e) => {
       setStatus(e.payload.status);
       setStatusMsg(e.payload.message ?? "");
     });
-    const unTranscript = listen<TranscriptEntry>("transcript", (e) => {
-      setTranscripts((prev) => [e.payload, ...prev].slice(0, 200));
+
+    const unAuth = onAuthChange(async (u) => {
+      setUser(u);
+      setAuthReady(true);
+
+      if (u) {
+        const fsSettings = await loadSettings(u.uid);
+        if (fsSettings) {
+          setSettings(fsSettings);
+          await invoke("save_settings", {
+            groqApiKey: fsSettings.groqApiKey,
+            pythonCmd:  fsSettings.pythonCmd,
+          }).catch(() => {});
+        } else {
+          const rustSettings = await invoke<Settings>("get_settings").catch(() => null);
+          if (rustSettings) setSettings(rustSettings);
+        }
+
+        const fsTranscripts = await loadTranscripts(u.uid);
+        setTranscripts(fsTranscripts.slice(0, 200));
+      } else {
+        setTranscripts([]);
+        setSettings({ groqApiKey: "", pythonCmd: "python" });
+      }
     });
+
     return () => {
       unStatus.then((f) => f());
-      unTranscript.then((f) => f());
+      unAuth();
     };
   }, []);
 
+  useEffect(() => {
+    if (!user) return;
+    const uid = user.uid;
+
+    const unTranscript = listen<TranscriptEntry>("transcript", (e) => {
+      const entry = e.payload;
+      setTranscripts((prev) => [entry, ...prev].slice(0, 200));
+      saveTranscript(uid, {
+        text:      entry.text,
+        engine:    entry.engine,
+        timestamp: entry.timestamp,
+      }).catch(console.error);
+    });
+
+    return () => { unTranscript.then((f) => f()); };
+  }, [user]);
+
   const saveSettings = useCallback(async () => {
     await invoke("save_settings", { groqApiKey: settings.groqApiKey, pythonCmd: settings.pythonCmd });
+    if (user) {
+      await saveSettings_fs(user.uid, {
+        groqApiKey: settings.groqApiKey,
+        pythonCmd:  settings.pythonCmd,
+      }).catch(console.error);
+    }
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
-  }, [settings]);
+  }, [settings, user]);
 
   const copyEntry = useCallback((text: string, key: string) => {
     navigator.clipboard.writeText(text).then(() => {
@@ -283,6 +336,22 @@ export default function App() {
   const words  = totalWords(transcripts);
   const days   = activeDays(transcripts);
   const groups = groupByDate(transcripts);
+
+  if (!authReady) {
+    return (
+      <div className={`app${lightMode ? " light-mode" : ""}`} style={{ alignItems: "center", justifyContent: "center" }}>
+        <div style={{ width: 24, height: 24, borderRadius: "50%", border: "2px solid var(--border-bright)", borderTopColor: "var(--cyan)", animation: "spin 0.7s linear infinite" }} />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className={`app${lightMode ? " light-mode" : ""}`}>
+        <LoginScreen onSignIn={() => {}} />
+      </div>
+    );
+  }
 
   return (
     <div className={`app${lightMode ? " light-mode" : ""}`}>
@@ -326,10 +395,12 @@ export default function App() {
             <span className="nav-label">Help</span>
           </button>
           <div className="sidebar-user">
-            <div className="user-avatar">S</div>
+            <div className="user-avatar">
+              {user.displayName?.[0]?.toUpperCase() ?? "S"}
+            </div>
             <div className="user-info">
-              <p className="user-name">Shreyas</p>
-              <p className="user-plan">Pro Plan</p>
+              <p className="user-name">{user.displayName ?? "User"}</p>
+              <p className="user-plan">{user.email ?? ""}</p>
             </div>
           </div>
         </div>
@@ -398,7 +469,14 @@ export default function App() {
                   >
                     {lightMode ? <IcMoon /> : <IcSun />}
                   </button>
-                  <div className="header-avatar-btn">S</div>
+                  <div
+                    className="header-avatar-btn"
+                    title="Sign out"
+                    style={{ cursor: "pointer" }}
+                    onClick={() => signOutUser().catch(console.error)}
+                  >
+                    {user.displayName?.[0]?.toUpperCase() ?? "S"}
+                  </div>
                 </div>
               </div>
               <p className="subtitle">Hold <kbd>Ctrl</kbd> + <kbd>Win</kbd> to dictate</p>

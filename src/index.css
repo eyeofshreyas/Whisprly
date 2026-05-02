@@ -179,6 +179,10 @@ body::before {
   50%       { box-shadow: 0 0 24px rgba(0, 212, 255, 0.28); }
 }
 
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 /* ── Layout ───────────────────────────────────────────────────────────────── */
 .app { display: flex; height: 100vh; position: relative; z-index: 1; transition: background var(--transition); }
 
