@@ -131,6 +131,30 @@ function IcBell() {
   );
 }
 
+function IcSun() {
+  return (
+    <svg {...svgBase}>
+      <circle cx="8" cy="8" r="3.2" />
+      <line x1="8" y1="1" x2="8" y2="2.5" />
+      <line x1="8" y1="13.5" x2="8" y2="15" />
+      <line x1="1" y1="8" x2="2.5" y2="8" />
+      <line x1="13.5" y1="8" x2="15" y2="8" />
+      <line x1="3.05" y1="3.05" x2="4.1" y2="4.1" />
+      <line x1="11.9" y1="11.9" x2="12.95" y2="12.95" />
+      <line x1="3.05" y1="12.95" x2="4.1" y2="11.9" />
+      <line x1="11.9" y1="4.1" x2="12.95" y2="3.05" />
+    </svg>
+  );
+}
+
+function IcMoon() {
+  return (
+    <svg {...svgBase}>
+      <path d="M13.5 10A6 6 0 0 1 6 2.5a6.5 6.5 0 1 0 7.5 7.5z" />
+    </svg>
+  );
+}
+
 function IcMic() {
   return (
     <svg {...svgBase}>
@@ -224,6 +248,7 @@ export default function App() {
   const [saved, setSaved]           = useState(false);
   const [activeNav, setActiveNav]   = useState("home");
   const [copiedKey, setCopiedKey]   = useState<string | null>(null);
+  const [lightMode, setLightMode]   = useState(false);
 
   useEffect(() => {
     invoke<TranscriptEntry[]>("get_transcript_log").then(setTranscripts).catch(() => {});
@@ -260,7 +285,7 @@ export default function App() {
   const groups = groupByDate(transcripts);
 
   return (
-    <div className="app">
+    <div className={`app${lightMode ? " light-mode" : ""}`}>
       {/* ── Sidebar ── */}
       <aside className="sidebar">
         <div className="sidebar-top">
@@ -365,6 +390,13 @@ export default function App() {
                 <div className="header-actions">
                   <button className="header-action-btn" aria-label="Notifications">
                     <IcBell />
+                  </button>
+                  <button
+                    className="header-action-btn"
+                    aria-label={lightMode ? "Switch to dark mode" : "Switch to light mode"}
+                    onClick={() => setLightMode(m => !m)}
+                  >
+                    {lightMode ? <IcMoon /> : <IcSun />}
                   </button>
                   <div className="header-avatar-btn">S</div>
                 </div>

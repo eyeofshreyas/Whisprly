@@ -56,6 +56,50 @@
   --transition:      200ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+/* ── Light mode ───────────────────────────────────────────────────────────── */
+.light-mode {
+  --bg-base:        #f4f6fb;
+  --bg-surface:     #ffffff;
+  --bg-card:        rgba(0, 0, 0, 0.030);
+  --bg-card-hover:  rgba(0, 0, 0, 0.056);
+  --bg-glass:       rgba(244, 246, 251, 0.92);
+  --border:         rgba(0, 0, 0, 0.07);
+  --border-bright:  rgba(0, 0, 0, 0.14);
+
+  --cyan:           #0284c7;
+  --cyan-dim:       rgba(2, 132, 199, 0.10);
+  --violet:         #7c3aed;
+  --violet-dim:     rgba(124, 58, 237, 0.10);
+  --green:          #059669;
+  --green-dim:      rgba(5, 150, 105, 0.10);
+  --amber:          #d97706;
+  --amber-dim:      rgba(217, 119, 6, 0.10);
+  --red:            #dc2626;
+
+  --text-0:         #0f172a;
+  --text-1:         rgba(15, 23, 42, 0.85);
+  --text-2:         rgba(15, 23, 42, 0.55);
+  --text-3:         rgba(15, 23, 42, 0.38);
+  --text-4:         rgba(15, 23, 42, 0.20);
+
+  --bg:             #f4f6fb;
+  --bg-elevated:    #ffffff;
+  --bg-hover:       rgba(0, 0, 0, 0.056);
+  --sidebar-bg:     #ffffff;
+  --accent:         #7c3aed;
+  --accent-dim:     rgba(124, 58, 237, 0.10);
+  --accent-glow:    rgba(124, 58, 237, 0.18);
+  --accent-dark:    #6d28d9;
+
+  --recording:         #dc2626;
+  --recording-glow:    rgba(220, 38, 38, 0.20);
+  --transcribing:      #d97706;
+  --transcribing-glow: rgba(217, 119, 6, 0.20);
+  --ready:             #059669;
+}
+
+.light-mode body::before { opacity: 0.12; }
+
 /* ── Reset ────────────────────────────────────────────────────────────────── */
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -66,6 +110,7 @@ body {
   height: 100vh;
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
+  transition: background var(--transition), color var(--transition);
 }
 
 /* Noise texture overlay */
@@ -135,7 +180,7 @@ body::before {
 }
 
 /* ── Layout ───────────────────────────────────────────────────────────────── */
-.app { display: flex; height: 100vh; position: relative; z-index: 1; }
+.app { display: flex; height: 100vh; position: relative; z-index: 1; transition: background var(--transition); }
 
 /* ── Sidebar ──────────────────────────────────────────────────────────────── */
 .sidebar {
