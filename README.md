@@ -1,6 +1,10 @@
-# Whisprly
+<div align="center">
+  <img src="app-icon-transparent.png" width="200" alt="WisperFlow Logo">
+  <h1>WisperFlow (Whisprly)</h1>
+  <p>A modern audio transcription desktop application built with Tauri, React, Vite, and TypeScript.</p>
+</div>
 
-Whisprly is a modern desktop application built with Tauri, React, Vite, and TypeScript.
+---
 
 ## Getting Started
 
