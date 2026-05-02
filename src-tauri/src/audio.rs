@@ -106,6 +106,17 @@ pub fn record(stop: Arc<AtomicBool>) -> RecordingResult {
     RecordingResult { samples: data, sample_rate, channels }
 }
 
+/// Returns true when the recording is effectively silent (no speech detected).
+/// RMS of 0.015 sits comfortably above ambient noise (~0.002–0.008) but below
+/// even quiet whispering (~0.02+), so accidental short presses are suppressed.
+pub fn is_silent(samples: &[f32]) -> bool {
+    if samples.is_empty() {
+        return true;
+    }
+    let rms = (samples.iter().map(|&s| s * s).sum::<f32>() / samples.len() as f32).sqrt();
+    rms < 0.015
+}
+
 // Mix all channels down to mono.
 fn to_mono(samples: &[f32], channels: usize) -> Vec<f32> {
     if channels == 1 {

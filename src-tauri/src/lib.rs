@@ -121,6 +121,12 @@ async fn coordinator(
                         continue;
                     }
 
+                    if audio::is_silent(&result.samples) {
+                        emit_status(&app, "idle", None);
+                        hide_overlay(&app);
+                        continue;
+                    }
+
                     let wav = audio::to_wav(result);
                     let s = settings.lock().unwrap().clone();
 

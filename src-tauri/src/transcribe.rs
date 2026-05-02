@@ -7,10 +7,13 @@ const HALLUCINATIONS: &[&str] = &[
     "like and subscribe",
     "subtitles by",
     "transcribed by",
+    "brought to you by",
     "[music]",
     "[applause]",
     "[silence]",
     "(silence)",
+    "[background noise]",
+    "(background noise)",
     "...",
 ];
 
