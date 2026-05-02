@@ -5,19 +5,18 @@ import "./overlay.css";
 
 type Status = "idle" | "recording" | "transcribing";
 
-const BAR_COUNT = 24;
-const HEIGHTS = [3, 6, 11, 17, 24, 28, 24, 18, 12, 7, 4, 9, 16, 22, 26, 22, 16, 10, 6, 4, 8, 15, 21, 17];
+const HEIGHTS = [2, 5, 8, 12, 10, 7, 4, 2, 6, 10, 8, 5, 3, 9, 7, 4];
 
 function Waveform({ status }: { status: Status }) {
   return (
     <div className={`ov-waveform ov-waveform--${status}`}>
-      {Array.from({ length: BAR_COUNT }).map((_, i) => (
+      {Array.from({ length: 16 }).map((_, i) => (
         <span
           key={i}
           className="ov-wave-bar"
           style={{
-            "--base-h": `${HEIGHTS[i % HEIGHTS.length]}px`,
-            animationDelay: `${(i * 0.04).toFixed(3)}s`,
+            "--base-h": `${HEIGHTS[i]}px`,
+            animationDelay: `${(i * 0.055).toFixed(3)}s`,
           } as React.CSSProperties}
         />
       ))}
@@ -45,12 +44,6 @@ export default function Overlay() {
       onClick={handleClick}
       title={status === "recording" ? "Click to stop" : undefined}
     >
-      <div className="ov-left">
-        <span className="ov-dot" />
-        <span className="ov-label">
-          {status === "recording" ? "Listening" : "Transcribing"}
-        </span>
-      </div>
       <Waveform status={status} />
     </div>
   );
