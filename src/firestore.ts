@@ -55,5 +55,12 @@ export async function loadTranscripts(uid: string): Promise<FSTranscriptEntry[]>
     limit(200),
   );
   const snap = await getDocs(q);
-  return snap.docs.map(d => d.data() as FSTranscriptEntry);
+  return snap.docs.map(d => {
+    const raw = d.data();
+    return {
+      text:      typeof raw.text      === "string" ? raw.text      : "",
+      engine:    typeof raw.engine    === "string" ? raw.engine    : "unknown",
+      timestamp: typeof raw.timestamp === "number" ? raw.timestamp : 0,
+    } satisfies FSTranscriptEntry;
+  });
 }

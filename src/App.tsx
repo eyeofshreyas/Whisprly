@@ -266,29 +266,34 @@ export default function App() {
       setStatusMsg(e.payload.message ?? "");
     });
 
-    const unAuth = onAuthChange(async (u) => {
-      setUser(u);
-      setAuthReady(true);
-
-      if (u) {
-        const fsSettings = await loadSettings(u.uid);
-        if (fsSettings) {
-          setSettings(fsSettings);
-          await invoke("save_settings", {
-            groqApiKey: fsSettings.groqApiKey,
-            pythonCmd:  fsSettings.pythonCmd,
-          }).catch(() => {});
-        } else {
-          const rustSettings = await invoke<Settings>("get_settings").catch(() => null);
-          if (rustSettings) setSettings(rustSettings);
+    const unAuth = onAuthChange((u) => {
+      void (async () => {
+        try {
+          setUser(u);
+          if (u) {
+            const fsSettings = await loadSettings(u.uid);
+            if (fsSettings) {
+              setSettings(fsSettings);
+              await invoke("save_settings", {
+                groqApiKey: fsSettings.groqApiKey,
+                pythonCmd:  fsSettings.pythonCmd,
+              }).catch(() => {});
+            } else {
+              const rustSettings = await invoke<Settings>("get_settings").catch(() => null);
+              if (rustSettings) setSettings(rustSettings);
+            }
+            const fsTranscripts = await loadTranscripts(u.uid);
+            setTranscripts(fsTranscripts);
+          } else {
+            setTranscripts([]);
+            setSettings({ groqApiKey: "", pythonCmd: "python" });
+          }
+        } catch (err) {
+          console.error("Auth change handler failed:", err);
+        } finally {
+          setAuthReady(true);
         }
-
-        const fsTranscripts = await loadTranscripts(u.uid);
-        setTranscripts(fsTranscripts.slice(0, 200));
-      } else {
-        setTranscripts([]);
-        setSettings({ groqApiKey: "", pythonCmd: "python" });
-      }
+      })();
     });
 
     return () => {
@@ -456,7 +461,7 @@ export default function App() {
               <div className="header-row">
                 <div>
                   <p className="header-greeting">{getGreeting()}</p>
-                  <h1 className="welcome">Welcome back, Shreyas</h1>
+                  <h1 className="welcome">{`Welcome back, ${user.displayName?.split(" ")[0] ?? "there"}`}</h1>
                 </div>
                 <div className="header-actions">
                   <button className="header-action-btn" aria-label="Notifications">
