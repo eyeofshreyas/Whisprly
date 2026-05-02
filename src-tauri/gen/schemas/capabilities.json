@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"Default capability for Whisprly","local":true,"windows":["main","overlay"],"permissions":["core:default"]}}
