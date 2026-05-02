@@ -4,65 +4,101 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What is Whisprly
 
-A Tauri v2 desktop dictation app (Windows-first). Hold **Ctrl + Win** to record audio, release to transcribe. The transcript is auto-typed into whatever window was focused, and also appended to the in-app log. Transcription uses Groq (cloud, `whisper-large-v3-turbo`) with a local Python/faster-whisper fallback.
+A Tauri v2 desktop dictation app (Windows-first). Hold **Ctrl + Win** to record audio, release to transcribe. The transcript is auto-typed into the previously focused window and appended to the in-app history log. Transcription uses Groq (cloud, `whisper-large-v3-turbo`) with a local Python/faster-whisper fallback.
 
 ## Commands
 
 ### Development
 ```
-npm run tauri dev        # start Tauri dev (launches Vite + Rust backend)
-npm run dev              # Vite only (no Tauri shell, for pure UI work)
+npm run tauri dev        # Vite + Rust dev server (hot-reload frontend, recompile backend)
+npm run dev              # Vite only — pure UI work without the Tauri shell
 ```
 
 ### Build
 ```
-npm run tauri build      # production bundle (runs tsc + vite build + cargo release)
+npm run tauri build      # production bundle: tsc + vite build + cargo release
 npm run build            # frontend only
 ```
 
 ### Rust
 ```
 cd src-tauri
-cargo check              # type-check without linking
+cargo check              # type-check without linking (fast)
 cargo clippy             # lint
 cargo build              # debug build
 ```
 
-There is no test suite yet.
+There is no test suite.
 
 ## Architecture
 
-The app has two distinct layers that communicate via Tauri's IPC bridge.
+Two layers connected by Tauri's IPC bridge.
 
 ### Frontend — `src/`
-Single-file React app ([src/App.tsx](src/App.tsx)). No router, no state management library. State is plain `useState`. Communicates with the backend via:
-- `invoke(command, args)` — request/response (get/save settings, fetch transcript log)
-- `listen(event, handler)` — push events from Rust (`"status"`, `"transcript"`)
 
-Styling is a single flat CSS file ([src/index.css](src/index.css)) — no Tailwind, no CSS modules.
+- **`App.tsx`** — single-file React app, no router, no state library. All state is `useState`. Two windows share the same entry point (`main.tsx`), distinguished by `?window=overlay` in the URL.
+- **`Overlay.tsx`** — minimal second window: a 100×25 transparent floating pill that appears during recording/transcribing, showing an animated waveform. Clicking it stops recording.
+- **`index.css`** — flat CSS file with CSS custom properties (design tokens) at `:root`. Dark theme throughout. No Tailwind, no CSS modules.
+
+Backend events consumed by the frontend:
+| Event | Payload |
+|---|---|
+| `"status"` | `{ status: "idle" \| "recording" \| "transcribing", message?: string }` |
+| `"transcript"` | `TranscriptEntry { text, engine, timestamp }` |
+
+Tauri commands invoked by the frontend: `get_settings`, `save_settings`, `get_transcript_log`, `stop_recording`.
 
 ### Backend — `src-tauri/src/`
 
 | File | Role |
 |---|---|
-| [lib.rs](src-tauri/src/lib.rs) | Entry point, `AppState`, `coordinator` async loop, Tauri commands |
-| [hotkey.rs](src-tauri/src/hotkey.rs) | Blocks on `rdev::listen`; sends `HotkeyEvent::{Start,Stop}` over an unbounded mpsc channel |
-| [audio.rs](src-tauri/src/audio.rs) | Records from default input device via `cpal`; converts any sample format to f32; encodes to WAV bytes via `hound` |
-| [transcribe.rs](src-tauri/src/transcribe.rs) | `groq()` — HTTP multipart to Groq API; `local()` — shells out to `sidecar/whisper_sidecar.py` |
-| [auto_type.rs](src-tauri/src/auto_type.rs) | Types the transcript text into the focused window using `enigo` |
+| `lib.rs` | `AppState`, `coordinator` async loop, all Tauri command handlers, system tray, close-to-tray logic |
+| `hotkey.rs` | Blocks on `rdev::listen`; tracks Ctrl+Win state; sends `HotkeyEvent::{Start,Stop}` on transitions |
+| `audio.rs` | Records via `cpal` (any sample format → f32); `is_silent()` RMS gate; encodes to 16 kHz mono WAV via `hound` |
+| `transcribe.rs` | `groq()` — multipart HTTP to Groq API; `local()` — shells out to Python sidecar; shared `is_hallucination()` filter |
+| `auto_type.rs` | Types transcript text into the focused window via `enigo`; appends a trailing space |
 
-**Coordinator flow** (`lib.rs::coordinator`):
-1. `HotkeyEvent::Start` → spawn blocking thread for `audio::record` (polls `AtomicBool` stop flag)
-2. `HotkeyEvent::Stop` → set stop flag, join thread, encode WAV
-3. Try Groq; on failure or missing key, fall back to local Python sidecar
-4. `auto_type::type_text` the result, push to `transcript_log`, emit `"transcript"` event
+### Coordinator flow (`lib.rs::coordinator`)
 
-**Settings** are held in `Arc<Mutex<AppSettings>>` inside `AppState` (Tauri managed state). They are not persisted to disk across restarts — only stored in-memory. The Groq API key can be seeded from a `.env` file via `dotenvy` (`GROQ_API` env var).
+```
+HotkeyEvent::Start
+  └─ show overlay, emit "recording", spawn blocking thread → audio::record()
+
+HotkeyEvent::Stop
+  └─ set stop flag, join thread
+  └─ samples.is_empty()  → idle, hide overlay
+  └─ audio::is_silent()  → idle, hide overlay   ← RMS < 0.015 threshold
+  └─ audio::to_wav()
+  └─ transcribe::groq()  → on error/missing key → transcribe::local()
+  └─ is_hallucination()  → idle, hide overlay
+  └─ auto_type::type_text(), push to log, emit "transcript", idle, hide overlay
+```
+
+### Settings
+
+`AppSettings` lives in `Arc<Mutex<AppSettings>>` inside `AppState`. **Not persisted to disk** — resets on restart. Seed the Groq key at startup via a `.env` file (`GROQ_API` var, loaded by `dotenvy`).
 
 ## Key constraints
 
-- Hotkey listener runs on its own OS thread (required by `rdev`) and sends to an async `tokio::mpsc` channel consumed by the coordinator task.
-- Audio recording is synchronous/blocking; it runs on a `std::thread` so it doesn't block the async runtime.
-- The local transcription sidecar is a Python script at `sidecar/whisper_sidecar.py` (next to the binary in production, or at `sidecar/whisper_sidecar.py` relative to the project root in dev).
-- Window size is fixed at 480×680 in [tauri.conf.json](src-tauri/tauri.conf.json).
-- Tauri capabilities are minimal — only `core:default` is granted ([capabilities/default.json](src-tauri/capabilities/default.json)).
+- `rdev::listen` blocks its thread; the hotkey listener must run on a dedicated `std::thread`.
+- Audio recording is synchronous/blocking and runs on a `std::thread` to avoid blocking the Tokio runtime.
+- The overlay window (`label: "overlay"`) is positioned programmatically by `show_overlay()` in `lib.rs` — it centres itself at the bottom of the primary monitor's work area.
+- The Python sidecar is at `sidecar/whisper_sidecar.py` relative to the binary in production, or relative to the project root in dev.
+- Tauri capabilities are minimal: only `core:default` ([capabilities/default.json](src-tauri/capabilities/default.json)).
+- Main window: 620×700, resizable, minimum 560×560. Overlay window: 100×25, no decorations, transparent, always-on-top.
+
+## Frontend CSS conventions
+
+All colours, radii, and transitions are defined as custom properties in `:root` (`index.css`). Key tokens:
+
+```
+--bg / --bg-elevated / --bg-hover   background layers
+--border / --border-muted           border colours
+--accent                            #6c47ff (purple)
+--text-0 … --text-4                 text scale (light → muted)
+--recording / --transcribing / --ready   status colours
+--radius-sm/md/lg / --radius-pill   border radii
+--transition-fast / --transition-mid easing tokens
+```
+
+Sidebar is 52 px wide, icon-only. Tooltips are CSS-only via `[data-label]::after`. Nav active state uses a left-edge `::before` bar.
