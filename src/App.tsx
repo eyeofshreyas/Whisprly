@@ -21,8 +21,8 @@ interface Settings {
   pythonCmd: string;
 }
 
-const BAR_COUNT = 24;
-const HEIGHTS = [3, 6, 10, 16, 22, 18, 12, 7, 4, 8, 14, 20, 24, 18, 10, 6, 3, 7, 13, 20, 22, 16, 9, 5];
+const BAR_COUNT = 36;
+const HEIGHTS = [3, 6, 10, 16, 22, 28, 24, 18, 13, 7, 4, 9, 16, 23, 28, 26, 20, 14, 8, 5, 10, 18, 25, 28, 22, 16, 10, 6, 4, 8, 14, 22, 27, 24, 18, 11];
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
 
@@ -132,7 +132,7 @@ const MiniWaveform = memo(function MiniWaveform({ status }: { status: Status }) 
           className="mini-bar"
           style={{
             "--base-h": `${HEIGHTS[i % HEIGHTS.length]}px`,
-            animationDelay: `${(i * 0.045).toFixed(3)}s`,
+            animationDelay: `${(i * 0.035).toFixed(3)}s`,
           } as React.CSSProperties}
         />
       ))}
@@ -332,9 +332,9 @@ export default function App() {
                 <span className="stat-label">words dictated</span>
               </div>
               <div className="stat-card">
-                <span className={`stat-dot stat-dot--${status}`} />
+                <span className={`status-ring status-ring--${status}`} />
                 <span className="stat-label stat-status">
-                  {statusMsg || (status === "idle" ? "Ready" : status === "recording" ? "Recording" : "Transcribing")}
+                  {statusMsg || (status === "idle" ? "Ready" : status === "recording" ? "Recording…" : "Transcribing…")}
                 </span>
               </div>
             </div>
@@ -354,7 +354,7 @@ export default function App() {
               {transcripts.length === 0 ? (
                 <div className="empty">
                   <div className="empty-icon">
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+                    <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
                       <rect x="9" y="2" width="6" height="12" rx="3" />
                       <path d="M5 10a7 7 0 0 0 14 0" />
                       <line x1="12" y1="19" x2="12" y2="22" />
@@ -362,7 +362,12 @@ export default function App() {
                     </svg>
                   </div>
                   <p className="empty-title">No recordings yet</p>
-                  <p className="empty-sub">Hold Ctrl + Win to start speaking</p>
+                  <p className="empty-sub">Press your hotkey and start speaking</p>
+                  <div className="empty-kbd-row">
+                    <kbd>Ctrl</kbd>
+                    <span className="empty-kbd-sep">+</span>
+                    <kbd>Win</kbd>
+                  </div>
                 </div>
               ) : (
                 Object.entries(groups).map(([date, entries]) => (
@@ -378,14 +383,16 @@ export default function App() {
                           onClick={() => copyEntry(t.text, key)}
                           title="Click to copy"
                         >
-                          <div className="entry-time">{formatTime(t.timestamp)}</div>
-                          <div className="entry-body">
-                            <p className="entry-text">{t.text}</p>
+                          <div className="entry-header">
+                            <div className="entry-time">{formatTime(t.timestamp)}</div>
+                            <span className={`entry-copy${copied ? " entry-copy--done" : ""}`} aria-hidden="true">
+                              {copied ? <IcCheck /> : <IcCopy />}
+                            </span>
+                          </div>
+                          <p className="entry-text">{t.text}</p>
+                          <div className="entry-footer">
                             <span className={`engine-badge engine-badge--${t.engine}`}>{t.engine}</span>
                           </div>
-                          <span className={`entry-copy${copied ? " entry-copy--done" : ""}`} aria-hidden="true">
-                            {copied ? <IcCheck /> : <IcCopy />}
-                          </span>
                         </div>
                       );
                     })}
