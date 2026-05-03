@@ -361,7 +361,7 @@ export default function App() {
   useEffect(() => {
     invoke<string>("get_output_mode")
       .then((m) => setOutputMode(m as "prose" | "email" | "code"))
-      .catch(() => {});
+      .catch(console.error);
   }, []);
 
   const saveSettings = useCallback(async () => {

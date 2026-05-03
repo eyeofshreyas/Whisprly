@@ -752,6 +752,8 @@ kbd {
   font-size: 9px;
   padding: 2px 7px;
   border-radius: var(--radius-pill);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
   color: var(--text-3);
   text-transform: uppercase;
   letter-spacing: 0.04em;
