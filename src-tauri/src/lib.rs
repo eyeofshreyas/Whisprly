@@ -242,9 +242,12 @@ fn get_output_mode(state: tauri::State<'_, AppState>) -> String {
 }
 
 #[tauri::command]
-fn set_output_mode(state: tauri::State<'_, AppState>, mode: String) {
+fn set_output_mode(state: tauri::State<'_, AppState>, mode: String) -> Result<(), String> {
     if ["prose", "email", "code"].contains(&mode.as_str()) {
         state.settings.lock().unwrap().output_mode = mode;
+        Ok(())
+    } else {
+        Err(format!("invalid mode: {mode}"))
     }
 }
 
