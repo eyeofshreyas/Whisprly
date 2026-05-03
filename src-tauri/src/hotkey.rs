@@ -37,6 +37,10 @@ pub fn start_listener(tx: UnboundedSender<HotkeyEvent>) {
             let _ = tx.send(HotkeyEvent::Start);
         } else if !both && was {
             was_both.store(false, Ordering::SeqCst);
+            // Reset both flags so a stuck Win key (OS may swallow its release)
+            // doesn't cause Ctrl alone to trigger the next session.
+            ctrl.store(false, Ordering::SeqCst);
+            win.store(false, Ordering::SeqCst);
             let _ = tx.send(HotkeyEvent::Stop);
         }
     }) {

@@ -23,6 +23,8 @@ enigo = "0.2"
 tempfile = "3"
 rdev = "0.5"
 dotenvy = "0.15"
+sha2 = "0.10"
+rand = "0.8"
 
 [package.metadata.tauri]
 
