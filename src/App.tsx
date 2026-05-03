@@ -9,14 +9,20 @@ import {
   loadSettings,
   saveTranscript,
   loadTranscripts,
+  deleteTranscript,
+  deleteAllTranscripts,
+  saveUserProfile,
 } from "./firestore";
 import LoginScreen from "./LoginScreen";
 
 type Status = "idle" | "recording" | "transcribing";
 
 interface TranscriptEntry {
-  text: string;
-  engine: string;
+  id?:       string;
+  text:      string;
+  raw_text?: string;
+  engine:    string;
+  mode?:     string;
   timestamp: number;
 }
 
@@ -126,6 +132,28 @@ function IcCheck() {
   return (
     <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
       <polyline points="2.5,8 6.5,12 13.5,4" />
+    </svg>
+  );
+}
+
+function IcTrash() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="2,4 14,4" />
+      <path d="M5.5 4V2.5h5V4" />
+      <path d="M3.5 4l1 9.5h7l1-9.5" />
+      <line x1="6.5" y1="7" x2="6.5" y2="11" />
+      <line x1="9.5" y1="7" x2="9.5" y2="11" />
+    </svg>
+  );
+}
+
+function IcLogOut() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6 2H2.5A1.5 1.5 0 0 0 1 3.5v9A1.5 1.5 0 0 0 2.5 14H6" />
+      <polyline points="10.5,11 14,8 10.5,5" />
+      <line x1="14" y1="8" x2="6" y2="8" />
     </svg>
   );
 }
@@ -252,11 +280,11 @@ export default function App() {
   const [statusMsg, setStatusMsg]   = useState("");
   const [transcripts, setTranscripts] = useState<TranscriptEntry[]>([]);
   const [settings, setSettings]     = useState<Settings>({ groqApiKey: "", pythonCmd: "python" });
-  const [showSettings, setShowSettings] = useState(false);
   const [saved, setSaved]           = useState(false);
+  const [outputMode, setOutputMode] = useState<"prose" | "email" | "code">("prose");
   const [activeNav, setActiveNav]   = useState("home");
   const [copiedKey, setCopiedKey]   = useState<string | null>(null);
-  const [lightMode, setLightMode]   = useState(false);
+  const [lightMode, setLightMode]   = useState(true);
   const [user, setUser]           = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
 
@@ -271,6 +299,11 @@ export default function App() {
         try {
           setUser(u);
           if (u) {
+            saveUserProfile(u.uid, {
+              email:       u.email,
+              displayName: u.displayName,
+              photoURL:    u.photoURL,
+            }).catch(console.error);
             const fsSettings = await loadSettings(u.uid);
             if (fsSettings) {
               setSettings(fsSettings);
@@ -311,13 +344,25 @@ export default function App() {
       setTranscripts((prev) => [entry, ...prev].slice(0, 200));
       saveTranscript(uid, {
         text:      entry.text,
+        raw_text:  entry.raw_text ?? "",
         engine:    entry.engine,
+        mode:      entry.mode ?? "prose",
         timestamp: entry.timestamp,
+      }).then(id => {
+        setTranscripts(prev => prev.map(t =>
+          t.timestamp === entry.timestamp && !t.id ? { ...t, id } : t
+        ));
       }).catch(console.error);
     });
 
     return () => { unTranscript.then((f) => f()); };
   }, [user]);
+
+  useEffect(() => {
+    invoke<string>("get_output_mode")
+      .then((m) => setOutputMode(m as "prose" | "email" | "code"))
+      .catch(() => {});
+  }, []);
 
   const saveSettings = useCallback(async () => {
     await invoke("save_settings", { groqApiKey: settings.groqApiKey, pythonCmd: settings.pythonCmd });
@@ -337,6 +382,18 @@ export default function App() {
       setTimeout(() => setCopiedKey(null), 1500);
     }).catch(() => {});
   }, []);
+
+  const deleteEntry = useCallback((id: string | undefined) => {
+    if (!id || !user) return;
+    setTranscripts(prev => prev.filter(t => t.id !== id));
+    deleteTranscript(user.uid, id).catch(console.error);
+  }, [user]);
+
+  const clearAll = useCallback(async () => {
+    if (!user) return;
+    setTranscripts([]);
+    await deleteAllTranscripts(user.uid).catch(console.error);
+  }, [user]);
 
   const words  = totalWords(transcripts);
   const days   = activeDays(transcripts);
@@ -364,9 +421,6 @@ export default function App() {
       <aside className="sidebar">
         <div className="sidebar-top">
           <div className="brand">
-            <div className="brand-icon">
-              <img src={logo} className="brand-logo" alt="" />
-            </div>
             <span className="brand-name">Whisprly</span>
           </div>
 
@@ -390,35 +444,38 @@ export default function App() {
           <button
             className="sidebar-util"
             aria-label="Settings"
-            onClick={() => { setActiveNav("home"); setShowSettings(true); }}
+            onClick={() => setActiveNav("settings")}
           >
             <IcSettings />
             <span className="nav-label">Settings</span>
           </button>
-          <button className="sidebar-util" aria-label="Help">
+          <button className="sidebar-util" aria-label="Help" onClick={() => setActiveNav("help")}>
             <IcHelp />
             <span className="nav-label">Help</span>
           </button>
-          <div className="sidebar-user">
+          <button className="sidebar-user" onClick={() => setActiveNav("profile")}>
             <div className="user-avatar">
-              {user.displayName?.[0]?.toUpperCase() ?? "S"}
+              {user.photoURL
+                ? <img src={user.photoURL} className="avatar-photo" alt="" />
+                : user.displayName?.[0]?.toUpperCase() ?? "S"
+              }
             </div>
             <div className="user-info">
               <p className="user-name">{user.displayName ?? "User"}</p>
               <p className="user-plan">{user.email ?? ""}</p>
             </div>
-          </div>
+          </button>
         </div>
       </aside>
 
       {/* ── Main content ── */}
       <main className="content">
-        <div key={showSettings ? "settings" : "home"} className="content-page">
-        {showSettings ? (
+        <div key={activeNav} className="content-page">
+        {activeNav === "settings" ? (
           <div className="settings-page">
             <div className="page-header">
               <h1 className="page-title">Settings</h1>
-              <button className="close-btn" onClick={() => setShowSettings(false)} aria-label="Close settings">✕</button>
+              <button className="close-btn" onClick={() => setActiveNav("home")} aria-label="Close settings">✕</button>
             </div>
             <div className="settings-form">
               <div className="settings-section">
@@ -433,6 +490,27 @@ export default function App() {
                     placeholder="gsk_..."
                   />
                   <span className="field-hint">Fast cloud transcription via Groq Whisper</span>
+                </div>
+              </div>
+              <div className="settings-section">
+                <p className="settings-section-title">Output Mode</p>
+                <div className="field-group">
+                  <label className="field-label">Polish style</label>
+                  <div className="mode-selector">
+                    {(["prose", "email", "code"] as const).map((m) => (
+                      <button
+                        key={m}
+                        className={`mode-btn${outputMode === m ? " mode-btn--active" : ""}`}
+                        onClick={() => {
+                          setOutputMode(m);
+                          invoke("set_output_mode", { mode: m }).catch(console.error);
+                        }}
+                      >
+                        {m.charAt(0).toUpperCase() + m.slice(1)}
+                      </button>
+                    ))}
+                  </div>
+                  <span className="field-hint">Applied to every transcript after Whisper</span>
                 </div>
               </div>
               <div className="settings-section">
@@ -452,6 +530,92 @@ export default function App() {
               <button className="save-btn" onClick={saveSettings}>
                 {saved ? "Saved ✓" : "Save settings"}
               </button>
+            </div>
+          </div>
+        ) : activeNav === "profile" ? (
+          <div className="profile-page">
+            <div className="page-header">
+              <h1 className="page-title">Profile</h1>
+              <button className="close-btn" onClick={() => setActiveNav("home")} aria-label="Close profile">✕</button>
+            </div>
+            <div className="profile-body">
+              <div className="profile-avatar-lg">
+                {user.photoURL
+                  ? <img src={user.photoURL} className="profile-photo" alt="" />
+                  : <img src={logo} className="profile-logo-img" alt="" />
+                }
+              </div>
+              <h2 className="profile-name">{user.displayName ?? "User"}</h2>
+              <p className="profile-email">{user.email ?? ""}</p>
+              <div className="profile-stats-row">
+                <div className="profile-stat">
+                  <span className="profile-stat-value">{days}</span>
+                  <span className="profile-stat-label">{days === 1 ? "day" : "days"} active</span>
+                </div>
+                <div className="profile-stat">
+                  <span className="profile-stat-value">{formatWords(words)}</span>
+                  <span className="profile-stat-label">words dictated</span>
+                </div>
+                <div className="profile-stat">
+                  <span className="profile-stat-value">{transcripts.length}</span>
+                  <span className="profile-stat-label">recordings</span>
+                </div>
+              </div>
+              <div className="profile-actions">
+                <button className="logout-btn" onClick={() => signOutUser().catch(console.error)}>
+                  <IcLogOut />
+                  Sign out
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : activeNav === "help" ? (
+          <div className="help-page">
+            <div className="page-header">
+              <h1 className="page-title">Help</h1>
+              <button className="close-btn" onClick={() => setActiveNav("home")} aria-label="Close help">✕</button>
+            </div>
+            <div className="help-body">
+              <div className="help-section">
+                <div className="help-step-num">1</div>
+                <div className="help-step-content">
+                  <h3 className="help-step-title">Start dictating</h3>
+                  <p className="help-step-desc">Hold <kbd>Ctrl</kbd> + <kbd>Win</kbd> and speak. Release both keys when you're done.</p>
+                </div>
+              </div>
+              <div className="help-section">
+                <div className="help-step-num">2</div>
+                <div className="help-step-content">
+                  <h3 className="help-step-title">Text is typed automatically</h3>
+                  <p className="help-step-desc">After you release, Whisprly transcribes your speech and types it into whatever app or text field was focused before you pressed the hotkey.</p>
+                </div>
+              </div>
+              <div className="help-section">
+                <div className="help-step-num">3</div>
+                <div className="help-step-content">
+                  <h3 className="help-step-title">Your history is saved here</h3>
+                  <p className="help-step-desc">Every transcription appears in the Home feed. Click any entry to copy it. Hover to reveal the delete button.</p>
+                </div>
+              </div>
+              <div className="help-section">
+                <div className="help-step-num">4</div>
+                <div className="help-step-content">
+                  <h3 className="help-step-title">Works best with a Groq key</h3>
+                  <p className="help-step-desc">Groq gives you fast, accurate cloud transcription. Go to <strong>Settings</strong> and paste your free API key from console.groq.com.</p>
+                </div>
+              </div>
+              <div className="help-section">
+                <div className="help-step-num">5</div>
+                <div className="help-step-content">
+                  <h3 className="help-step-title">Tips</h3>
+                  <p className="help-step-desc">
+                    — Click any transcript to copy it to clipboard<br />
+                    — Works in any app: Word, Chrome, VS Code, Slack<br />
+                    — The floating pill shows recording / transcribing status<br />
+                    — Click the pill to cancel a recording
+                  </p>
+                </div>
+              </div>
             </div>
           </div>
         ) : (
@@ -476,11 +640,14 @@ export default function App() {
                   </button>
                   <div
                     className="header-avatar-btn"
-                    title="Sign out"
-                    style={{ cursor: "pointer" }}
-                    onClick={() => signOutUser().catch(console.error)}
+                    title="View profile"
+                    style={{ cursor: "pointer", overflow: "hidden" }}
+                    onClick={() => setActiveNav("profile")}
                   >
-                    {user.displayName?.[0]?.toUpperCase() ?? "S"}
+                    {user.photoURL
+                      ? <img src={user.photoURL} style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="" />
+                      : user.displayName?.[0]?.toUpperCase() ?? "S"
+                    }
                   </div>
                 </div>
               </div>
@@ -517,6 +684,11 @@ export default function App() {
 
             {/* Transcript feed */}
             <div className="feed">
+              {transcripts.length > 0 && (
+                <div className="feed-header">
+                  <button className="clear-all-btn" onClick={clearAll}>Clear all</button>
+                </div>
+              )}
               {transcripts.length === 0 ? (
                 <div className="empty">
                   <div className="empty-icon">
@@ -552,14 +724,25 @@ export default function App() {
                         >
                           <div className="entry-header">
                             <div className="entry-time">{formatTime(t.timestamp)}</div>
-                            <span className={`entry-copy${copied ? " entry-copy--done" : ""}`} aria-hidden="true">
-                              {copied ? <IcCheck /> : <IcCopy />}
-                            </span>
+                            <div className="entry-actions">
+                              <span className={`entry-copy${copied ? " entry-copy--done" : ""}`} aria-hidden="true">
+                                {copied ? <IcCheck /> : <IcCopy />}
+                              </span>
+                              <span
+                                className="entry-delete"
+                                aria-label="Delete"
+                                onClick={e => { e.stopPropagation(); deleteEntry(t.id); }}
+                              >
+                                <IcTrash />
+                              </span>
+                            </div>
                           </div>
                           <p className="entry-text">{t.text}</p>
-                          <div className="entry-footer">
-                            <span className={`engine-badge engine-badge--${t.engine}`}>{t.engine}</span>
-                          </div>
+                          {t.mode && (
+                            <div className="entry-footer">
+                              <span className="mode-badge">{t.mode}</span>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
