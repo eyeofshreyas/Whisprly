@@ -10,7 +10,7 @@ import json
 import urllib.request
 import urllib.error
 
-OLLAMA_MODEL = "gemma:2b-instruct-q4_K_M"
+OLLAMA_MODEL = "gemma4:4b"
 OLLAMA_URL   = "http://localhost:11434/api/chat"
 
 
