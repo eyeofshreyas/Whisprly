@@ -84,6 +84,9 @@ async fn groq_polish(raw: &str, mode: &str, model: &str, api_key: &str) -> Resul
 
 async fn local_polish(raw: &str, mode: &str, python_cmd: &str) -> Result<String, String> {
     let sidecar = sidecar_path();
+    if !std::path::Path::new(&sidecar).exists() {
+        return Ok(raw.to_string());
+    }
     let raw_owned = raw.to_string();
     let mode_owned = mode.to_string();
     let python = python_cmd.to_string();
