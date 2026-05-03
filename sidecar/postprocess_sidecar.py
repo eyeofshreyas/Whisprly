@@ -1,11 +1,34 @@
 #!/usr/bin/env python3
 """
-Post-processing sidecar: polishes raw Whisper transcripts.
+Post-processing sidecar: polishes raw Whisper transcripts via Ollama.
 Reads raw text from stdin, writes corrected text to stdout.
-If llama_cpp or the model file is unavailable, prints input unchanged.
+If Ollama is not running or the model is unavailable, prints input unchanged.
 """
 import sys
 import argparse
+import json
+import urllib.request
+import urllib.error
+
+OLLAMA_MODEL = "gemma:2b-instruct-q4_K_M"
+OLLAMA_URL   = "http://localhost:11434/api/chat"
+
+
+def system_prompt(mode: str) -> str:
+    mode_rule = {
+        "email": "Format as a professional email with greeting and sign-off.",
+        "code":  "Strip all punctuation. Preserve camelCase and snake_case.",
+    }.get(mode, "Standard paragraph formatting.")
+    return (
+        "You are a transcript editor. The input is raw speech-to-text output.\n"
+        "Your job:\n"
+        "1. Fix punctuation — add commas, periods, question marks where appropriate.\n"
+        "2. Remove filler words: um, uh, like, you know, so, basically, literally.\n"
+        "3. Fix capitalization of proper nouns, acronyms, and sentence starts.\n"
+        "4. Do NOT change the meaning, add content, or rephrase sentences.\n"
+        "5. Output ONLY the corrected text. No preamble, no explanation, no quotes.\n"
+        f"{mode_rule}"
+    )
 
 
 def main():
@@ -16,42 +39,26 @@ def main():
     raw = sys.stdin.read()
 
     try:
-        from llama_cpp import Llama
-        import os
-
-        model_path = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "gemma-4-e2b-q4.gguf"
-        )
-        if not os.path.exists(model_path):
-            print(raw, end="")
-            return
-
-        mode_rule = {
-            "email": "Format as a professional email with greeting and sign-off.",
-            "code": "Strip all punctuation. Preserve camelCase and snake_case.",
-        }.get(args.mode, "Standard paragraph formatting.")
-
-        system_prompt = (
-            "You are a transcript editor. The input is raw speech-to-text output.\n"
-            "Your job:\n"
-            "1. Fix punctuation — add commas, periods, question marks where appropriate.\n"
-            "2. Remove filler words: um, uh, like, you know, so, basically, literally.\n"
-            "3. Fix capitalization of proper nouns, acronyms, and sentence starts.\n"
-            "4. Do NOT change the meaning, add content, or rephrase sentences.\n"
-            "5. Output ONLY the corrected text. No preamble, no explanation, no quotes.\n"
-            f"{mode_rule}"
-        )
-
-        llm = Llama(model_path=model_path, n_ctx=1024, verbose=False)
-        result = llm.create_chat_completion(
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": raw},
+        payload = json.dumps({
+            "model": OLLAMA_MODEL,
+            "messages": [
+                {"role": "system", "content": system_prompt(args.mode)},
+                {"role": "user",   "content": raw},
             ],
-            max_tokens=512,
-            temperature=0.0,
+            "stream": False,
+            "options": {"temperature": 0.0, "num_predict": 512},
+        }).encode()
+
+        req = urllib.request.Request(
+            OLLAMA_URL,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
         )
-        text = result["choices"][0]["message"]["content"].strip()
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+
+        text = data["message"]["content"].strip()
         print(text if text else raw, end="")
 
     except Exception:
