@@ -11,7 +11,9 @@ use tauri::WindowEvent;
 mod audio;
 mod auto_type;
 mod hotkey;
+mod oauth;
 mod transcribe;
+mod postprocess;
 
 pub enum HotkeyEvent {
     Start,
@@ -21,7 +23,9 @@ pub enum HotkeyEvent {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TranscriptEntry {
     pub text: String,
+    pub raw_text: String,
     pub engine: String,
+    pub mode: String,
     pub timestamp: u64,
 }
 
@@ -36,6 +40,8 @@ pub struct AppSettings {
     pub groq_api_key: String,
     pub python_cmd: String,
     pub sidecar_path: String,
+    pub postprocess_model: String,
+    pub output_mode: String,
 }
 
 pub struct AppState {
@@ -155,15 +161,27 @@ async fn coordinator(
                     };
 
                     match transcript {
-                        Some((engine, text)) if !text.is_empty() => {
-                            let t = text.clone();
-                            tokio::task::spawn_blocking(move || auto_type::type_text(&t))
+                        Some((engine, raw_text)) if !raw_text.is_empty() => {
+                            let polished = postprocess::polish(
+                                &raw_text,
+                                &s.output_mode,
+                                &s.postprocess_model,
+                                &s.groq_api_key,
+                                &s.python_cmd,
+                            )
+                            .await
+                            .unwrap_or_else(|_| raw_text.clone());
+
+                            let p = polished.clone();
+                            tokio::task::spawn_blocking(move || auto_type::type_text(&p))
                                 .await
                                 .ok();
 
                             let entry = TranscriptEntry {
-                                text,
+                                text: polished,
+                                raw_text: raw_text.clone(),
                                 engine: engine.to_string(),
+                                mode: s.output_mode.clone(),
                                 timestamp: std::time::SystemTime::now()
                                     .duration_since(std::time::UNIX_EPOCH)
                                     .unwrap()
@@ -218,11 +236,26 @@ async fn get_transcript_log(
     Ok(state.transcript_log.lock().unwrap().clone())
 }
 
+#[tauri::command]
+fn get_output_mode(state: tauri::State<'_, AppState>) -> String {
+    state.settings.lock().unwrap().output_mode.clone()
+}
+
+#[tauri::command]
+fn set_output_mode(state: tauri::State<'_, AppState>, mode: String) {
+    if ["prose", "email", "code"].contains(&mode.as_str()) {
+        state.settings.lock().unwrap().output_mode = mode;
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     dotenvy::dotenv().ok();
 
-    let groq_api_key = std::env::var("GROQ_API").unwrap_or_default();
+    let groq_api_key = option_env!("GROQ_API")
+        .map(str::to_string)
+        .or_else(|| std::env::var("GROQ_API").ok())
+        .unwrap_or_default();
     let python_cmd = if cfg!(windows) { "python".to_string() } else { "python3".to_string() };
 
     let sidecar_path = std::env::current_exe()
@@ -232,7 +265,13 @@ pub fn run() {
         .to_string_lossy()
         .to_string();
 
-    let settings = Arc::new(Mutex::new(AppSettings { groq_api_key, python_cmd, sidecar_path }));
+    let settings = Arc::new(Mutex::new(AppSettings {
+        groq_api_key,
+        python_cmd,
+        sidecar_path,
+        postprocess_model: "llama-3.1-8b-instant".to_string(),
+        output_mode: "prose".to_string(),
+    }));
     let transcript_log = Arc::new(Mutex::new(Vec::<TranscriptEntry>::new()));
 
     tauri::Builder::default()
@@ -308,6 +347,9 @@ pub fn run() {
             get_settings,
             get_transcript_log,
             stop_recording,
+            oauth::start_google_oauth,
+            get_output_mode,
+            set_output_mode,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
