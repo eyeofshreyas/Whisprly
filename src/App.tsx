@@ -23,7 +23,7 @@ interface TranscriptEntry {
   raw_text?: string;
   engine:    string;
   mode?:     string;
-  timestamp: number;
+  timestamp: string;
 }
 
 interface StatusPayload {
@@ -230,8 +230,8 @@ const MiniWaveform = memo(function MiniWaveform({ status }: { status: Status }) 
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function formatTime(ts: number) {
-  return new Date(ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+function formatTime(ts: string) {
+  return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
 function formatWords(n: number) {
@@ -241,7 +241,7 @@ function formatWords(n: number) {
 function groupByDate(entries: TranscriptEntry[]) {
   const groups: Record<string, TranscriptEntry[]> = {};
   for (const e of entries) {
-    const d = new Date(e.timestamp * 1000);
+    const d = new Date(e.timestamp);
     const today = new Date();
     const yesterday = new Date(today);
     yesterday.setDate(today.getDate() - 1);
@@ -259,7 +259,7 @@ function totalWords(entries: TranscriptEntry[]) {
 }
 
 function activeDays(entries: TranscriptEntry[]) {
-  return new Set(entries.map((e) => new Date(e.timestamp * 1000).toDateString())).size;
+  return new Set(entries.map((e) => new Date(e.timestamp).toDateString())).size;
 }
 
 // ── Nav data ──────────────────────────────────────────────────────────────────

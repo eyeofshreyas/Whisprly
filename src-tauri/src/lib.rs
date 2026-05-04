@@ -226,20 +226,15 @@ async fn get_settings(state: tauri::State<'_, AppState>) -> Result<serde_json::V
 }
 
 #[tauri::command]
-async fn get_transcript_log(
-    state: tauri::State<'_, AppState>,
-) -> Result<Vec<db::TranscriptEntry>, String> {
+fn get_transcript_log(state: tauri::State<'_, AppState>) -> Vec<db::TranscriptEntry> {
     let conn = state.db.lock().unwrap();
-    Ok(db::get_transcripts(&conn, 200).unwrap_or_default())
+    db::get_transcripts(&conn, 200).unwrap_or_default()
 }
 
 #[tauri::command]
-async fn search_transcripts(
-    query: String,
-    state: tauri::State<'_, AppState>,
-) -> Result<Vec<db::TranscriptEntry>, String> {
+fn search_transcripts(query: String, state: tauri::State<'_, AppState>) -> Vec<db::TranscriptEntry> {
     let conn = state.db.lock().unwrap();
-    Ok(db::search_transcripts(&conn, &query).unwrap_or_default())
+    db::search_transcripts(&conn, &query).unwrap_or_default()
 }
 
 #[tauri::command]
@@ -282,16 +277,16 @@ pub fn run() {
         output_mode: "prose".to_string(),
     }));
 
-    let db_path = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.join("transcripts.db")))
-        .unwrap_or_else(|| std::path::PathBuf::from("transcripts.db"));
-    let conn = Connection::open(&db_path).expect("open SQLite db");
-    db::init_db(&conn).expect("init db schema");
-    let db = Arc::new(Mutex::new(conn));
-
     tauri::Builder::default()
         .setup(|app| {
+            let db_path = app.path().app_data_dir()
+                .expect("no app data dir")
+                .join("transcripts.db");
+            std::fs::create_dir_all(db_path.parent().unwrap()).ok();
+            let conn = Connection::open(&db_path).expect("open SQLite db");
+            db::init_db(&conn).expect("init db schema");
+            let db = Arc::new(Mutex::new(conn));
+
             let app_handle = app.handle().clone();
             let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<HotkeyEvent>();
             let cmd_tx = tx.clone();
