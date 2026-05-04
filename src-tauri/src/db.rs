@@ -35,6 +35,20 @@ pub fn init_db(conn: &Connection) -> Result<()> {
             INSERT INTO transcripts_fts(rowid, text, raw_text)
             VALUES (new.id, new.text, new.raw_text);
         END;
+
+        CREATE TRIGGER IF NOT EXISTS transcripts_ad
+        AFTER DELETE ON transcripts BEGIN
+            INSERT INTO transcripts_fts(transcripts_fts, rowid, text, raw_text)
+            VALUES('delete', old.id, old.text, old.raw_text);
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS transcripts_au
+        AFTER UPDATE ON transcripts BEGIN
+            INSERT INTO transcripts_fts(transcripts_fts, rowid, text, raw_text)
+            VALUES('delete', old.id, old.text, old.raw_text);
+            INSERT INTO transcripts_fts(rowid, text, raw_text)
+            VALUES (new.id, new.text, new.raw_text);
+        END;
     ")
 }
 
@@ -121,6 +135,7 @@ mod tests {
         let results = get_transcripts(&conn, 10).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].text, "hello world");
+        assert!(results[0].id > 0, "database must assign a real rowid");
         assert_eq!(results[0].language, Some("en".to_string()));
     }
 
@@ -151,5 +166,24 @@ mod tests {
         let conn = mem_conn();
         let results = search_transcripts(&conn, "").unwrap();
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn get_transcripts_returns_newest_first() {
+        let conn = mem_conn();
+        for text in ["first", "second", "third"] {
+            insert_transcript(&conn, &TranscriptEntry {
+                id: 0,
+                text: text.to_string(),
+                raw_text: None,
+                engine: "groq".to_string(),
+                mode: "direct".to_string(),
+                language: None,
+                timestamp: "2026-05-04T00:00:00Z".to_string(),
+            }).unwrap();
+        }
+        let results = get_transcripts(&conn, 10).unwrap();
+        assert_eq!(results[0].text, "third", "most recent entry must be first");
+        assert_eq!(results[2].text, "first", "oldest entry must be last");
     }
 }
