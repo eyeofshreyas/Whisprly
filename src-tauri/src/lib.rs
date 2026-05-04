@@ -10,6 +10,7 @@ use tauri::WindowEvent;
 
 mod audio;
 mod auto_type;
+mod db;
 mod hotkey;
 mod oauth;
 mod transcribe;
