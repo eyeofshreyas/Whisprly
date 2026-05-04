@@ -35,6 +35,7 @@ pub struct AppSettings {
     pub sidecar_path: String,
     pub postprocess_model: String,
     pub output_mode: String,
+    pub language: String,
 }
 
 pub struct AppState {
@@ -129,8 +130,10 @@ async fn coordinator(
                     let wav = audio::to_wav(result);
                     let s = settings.lock().unwrap().clone();
 
+                    let language = transcribe::language_param(&s.language);
+
                     let transcript = if !s.groq_api_key.is_empty() {
-                        match transcribe::groq(&wav, &s.groq_api_key).await {
+                        match transcribe::groq(&wav, &s.groq_api_key, language.clone()).await {
                             Ok(t) => Some(("groq", t)),
                             Err(e) => {
                                 eprintln!("Groq error: {e}");
@@ -142,7 +145,7 @@ async fn coordinator(
                     };
 
                     let transcript = if transcript.is_none() {
-                        match transcribe::local(&wav, &s.python_cmd, &s.sidecar_path).await {
+                        match transcribe::local(&wav, &s.python_cmd, &s.sidecar_path, language.clone()).await {
                             Ok(t) => Some(("local", t)),
                             Err(e) => {
                                 eprintln!("Local error: {e}");
@@ -177,7 +180,7 @@ async fn coordinator(
                                 raw_text: Some(raw_text.clone()),
                                 engine: engine.to_string(),
                                 mode: s.output_mode.clone(),
-                                language: None,
+                                language: language.clone(),
                                 timestamp: chrono::Utc::now().to_rfc3339(),
                             };
                             {
@@ -209,10 +212,12 @@ async fn save_settings(
     state: tauri::State<'_, AppState>,
     groq_api_key: String,
     python_cmd: String,
+    language: String,
 ) -> Result<(), String> {
     let mut s = state.settings.lock().unwrap();
     s.groq_api_key = groq_api_key;
     s.python_cmd = python_cmd;
+    s.language = language;
     Ok(())
 }
 
@@ -222,6 +227,7 @@ async fn get_settings(state: tauri::State<'_, AppState>) -> Result<serde_json::V
     Ok(serde_json::json!({
         "groqApiKey": s.groq_api_key,
         "pythonCmd": s.python_cmd,
+        "language": s.language,
     }))
 }
 
@@ -275,6 +281,7 @@ pub fn run() {
         sidecar_path,
         postprocess_model: "llama-3.1-8b-instant".to_string(),
         output_mode: "prose".to_string(),
+        language: "auto".to_string(),
     }));
 
     tauri::Builder::default()
