@@ -26,6 +26,7 @@ dotenvy = "0.15"
 sha2 = "0.10"
 rand = "0.8"
 rusqlite = { version = "0.31", features = ["bundled"] }
+chrono = { version = "0.4", features = ["serde"] }
 
 [package.metadata.tauri]
 

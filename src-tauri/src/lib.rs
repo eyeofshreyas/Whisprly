@@ -7,6 +7,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::WindowEvent;
+use rusqlite::Connection;
 
 mod audio;
 mod auto_type;
@@ -19,15 +20,6 @@ mod postprocess;
 pub enum HotkeyEvent {
     Start,
     Stop,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct TranscriptEntry {
-    pub text: String,
-    pub raw_text: String,
-    pub engine: String,
-    pub mode: String,
-    pub timestamp: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -47,7 +39,7 @@ pub struct AppSettings {
 
 pub struct AppState {
     pub settings: Arc<Mutex<AppSettings>>,
-    pub transcript_log: Arc<Mutex<Vec<TranscriptEntry>>>,
+    pub db: Arc<Mutex<Connection>>,
     pub hotkey_tx: tokio::sync::mpsc::UnboundedSender<HotkeyEvent>,
 }
 
@@ -98,7 +90,7 @@ async fn coordinator(
     mut rx: tokio::sync::mpsc::UnboundedReceiver<HotkeyEvent>,
     app: AppHandle,
     settings: Arc<Mutex<AppSettings>>,
-    log: Arc<Mutex<Vec<TranscriptEntry>>>,
+    db: Arc<Mutex<Connection>>,
 ) {
     let mut recording: Option<RecordingHandle> = None;
 
@@ -173,23 +165,26 @@ async fn coordinator(
                             .await
                             .unwrap_or_else(|_| raw_text.clone());
 
+                            let entry_text = polished.clone();
                             let p = polished.clone();
                             tokio::task::spawn_blocking(move || auto_type::type_text(&p))
                                 .await
                                 .ok();
 
-                            let entry = TranscriptEntry {
-                                text: polished,
-                                raw_text: raw_text.clone(),
+                            let db_entry = db::TranscriptEntry {
+                                id: 0,
+                                text: entry_text.clone(),
+                                raw_text: Some(raw_text.clone()),
                                 engine: engine.to_string(),
                                 mode: s.output_mode.clone(),
-                                timestamp: std::time::SystemTime::now()
-                                    .duration_since(std::time::UNIX_EPOCH)
-                                    .unwrap()
-                                    .as_secs(),
+                                language: None,
+                                timestamp: chrono::Utc::now().to_rfc3339(),
                             };
-                            log.lock().unwrap().push(entry.clone());
-                            app.emit("transcript", entry).ok();
+                            {
+                                let conn = db.lock().unwrap();
+                                db::insert_transcript(&conn, &db_entry).ok();
+                            }
+                            app.emit("transcript", &db_entry).ok();
                             emit_status(&app, "idle", None);
                             hide_overlay(&app);
                         }
@@ -233,8 +228,18 @@ async fn get_settings(state: tauri::State<'_, AppState>) -> Result<serde_json::V
 #[tauri::command]
 async fn get_transcript_log(
     state: tauri::State<'_, AppState>,
-) -> Result<Vec<TranscriptEntry>, String> {
-    Ok(state.transcript_log.lock().unwrap().clone())
+) -> Result<Vec<db::TranscriptEntry>, String> {
+    let conn = state.db.lock().unwrap();
+    Ok(db::get_transcripts(&conn, 200).unwrap_or_default())
+}
+
+#[tauri::command]
+async fn search_transcripts(
+    query: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<db::TranscriptEntry>, String> {
+    let conn = state.db.lock().unwrap();
+    Ok(db::search_transcripts(&conn, &query).unwrap_or_default())
 }
 
 #[tauri::command]
@@ -276,7 +281,14 @@ pub fn run() {
         postprocess_model: "llama-3.1-8b-instant".to_string(),
         output_mode: "prose".to_string(),
     }));
-    let transcript_log = Arc::new(Mutex::new(Vec::<TranscriptEntry>::new()));
+
+    let db_path = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join("transcripts.db")))
+        .unwrap_or_else(|| std::path::PathBuf::from("transcripts.db"));
+    let conn = Connection::open(&db_path).expect("open SQLite db");
+    db::init_db(&conn).expect("init db schema");
+    let db = Arc::new(Mutex::new(conn));
 
     tauri::Builder::default()
         .setup(|app| {
@@ -286,12 +298,12 @@ pub fn run() {
 
             app.manage(AppState {
                 settings: settings.clone(),
-                transcript_log: transcript_log.clone(),
+                db: db.clone(),
                 hotkey_tx: cmd_tx,
             });
 
             std::thread::spawn(move || hotkey::start_listener(tx));
-            tauri::async_runtime::spawn(coordinator(rx, app_handle.clone(), settings, transcript_log));
+            tauri::async_runtime::spawn(coordinator(rx, app_handle.clone(), settings, db));
 
             // ── System tray ──
             let open_i = MenuItem::with_id(app, "open", "Open Whisprly", true, None::<&str>)?;
@@ -350,6 +362,7 @@ pub fn run() {
             save_settings,
             get_settings,
             get_transcript_log,
+            search_transcripts,
             stop_recording,
             oauth::start_google_oauth,
             get_output_mode,
