@@ -25,7 +25,6 @@ rdev = "0.5"
 dotenvy = "0.15"
 sha2 = "0.10"
 rand = "0.8"
-webrtcvad = "0.4"
 rusqlite = { version = "0.31", features = ["bundled"] }
 
 [package.metadata.tauri]
