@@ -1,6 +1,6 @@
 import "./index.css";
 import logo from "./assets/logo.png";
-import { memo, useEffect, useState, useCallback } from "react";
+import { memo, useEffect, useState, useCallback, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { onAuthChange, signOutUser, type User } from "./auth";
@@ -415,18 +415,29 @@ export default function App() {
     await deleteAllTranscripts(user.uid).catch(console.error);
   }, [user]);
 
-  const handleSearch = useCallback(async (q: string) => {
+  const searchGenRef = useRef(0);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleSearch = useCallback((q: string) => {
     setSearchQuery(q);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
     if (q.trim() === "") {
       setSearchResults(null);
       return;
     }
-    try {
-      const results = await invoke<TranscriptEntry[]>("search_transcripts", { query: q });
-      setSearchResults(results);
-    } catch {
-      setSearchResults([]);
-    }
+    debounceRef.current = setTimeout(async () => {
+      const gen = ++searchGenRef.current;
+      try {
+        const results = await invoke<TranscriptEntry[]>("search_transcripts", { query: q });
+        if (gen === searchGenRef.current) {
+          setSearchResults(results);
+        }
+      } catch {
+        if (gen === searchGenRef.current) {
+          setSearchResults([]);
+        }
+      }
+    }, 200);
   }, []);
 
   const words  = totalWords(transcripts);
@@ -740,29 +751,36 @@ export default function App() {
                 value={searchQuery}
                 onChange={(e) => handleSearch(e.target.value)}
               />
-              {displayList.length > 0 && (
+              {displayList.length > 0 && searchResults === null && (
                 <div className="feed-header">
                   <button className="clear-all-btn" onClick={clearAll}>Clear all</button>
                 </div>
               )}
               {displayList.length === 0 ? (
-                <div className="empty">
-                  <div className="empty-icon">
-                    <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
-                      <rect x="9" y="2" width="6" height="12" rx="3" />
-                      <path d="M5 10a7 7 0 0 0 14 0" />
-                      <line x1="12" y1="19" x2="12" y2="22" />
-                      <line x1="8" y1="22" x2="16" y2="22" />
-                    </svg>
+                searchResults !== null ? (
+                  <div className="empty">
+                    <p className="empty-title">No results</p>
+                    <p className="empty-sub">Try a different search term</p>
                   </div>
-                  <p className="empty-title">No recordings yet</p>
-                  <p className="empty-sub">Press your hotkey and start speaking</p>
-                  <div className="empty-kbd-row">
-                    <kbd>Ctrl</kbd>
-                    <span className="empty-kbd-sep">+</span>
-                    <kbd>Win</kbd>
+                ) : (
+                  <div className="empty">
+                    <div className="empty-icon">
+                      <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="9" y="2" width="6" height="12" rx="3" />
+                        <path d="M5 10a7 7 0 0 0 14 0" />
+                        <line x1="12" y1="19" x2="12" y2="22" />
+                        <line x1="8" y1="22" x2="16" y2="22" />
+                      </svg>
+                    </div>
+                    <p className="empty-title">No recordings yet</p>
+                    <p className="empty-sub">Press your hotkey and start speaking</p>
+                    <div className="empty-kbd-row">
+                      <kbd>Ctrl</kbd>
+                      <span className="empty-kbd-sep">+</span>
+                      <kbd>Win</kbd>
+                    </div>
                   </div>
-                </div>
+                )
               ) : (
                 Object.entries(groups).map(([date, entries]) => (
                   <div key={date} className="date-group">
