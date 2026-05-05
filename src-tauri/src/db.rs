@@ -113,7 +113,7 @@ pub fn search_transcripts(conn: &Connection, query: &str) -> Result<Vec<Transcri
 pub fn clear_all_transcripts(conn: &Connection) -> Result<()> {
     conn.execute_batch("
         DELETE FROM transcripts;
-        DELETE FROM transcripts_fts;
+        INSERT INTO transcripts_fts(transcripts_fts) VALUES('delete-all');
     ")
 }
 
