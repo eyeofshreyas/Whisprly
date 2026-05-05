@@ -1,29 +1,35 @@
 import "./index.css";
 import logo from "./assets/logo.png";
-import { memo, useEffect, useState, useCallback } from "react";
+import { memo, useEffect, useState, useCallback, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { onAuthChange, signOutUser, type User } from "./auth";
-import {
-  saveSettings as saveSettings_fs,
-  loadSettings,
-  saveTranscript,
-  loadTranscripts,
-  deleteTranscript,
-  deleteAllTranscripts,
-  saveUserProfile,
-} from "./firestore";
 import LoginScreen from "./LoginScreen";
+
+const LANGUAGES = [
+  { code: "auto", label: "Auto-detect" },
+  { code: "en",   label: "English" },
+  { code: "es",   label: "Spanish" },
+  { code: "fr",   label: "French" },
+  { code: "de",   label: "German" },
+  { code: "it",   label: "Italian" },
+  { code: "pt",   label: "Portuguese" },
+  { code: "ru",   label: "Russian" },
+  { code: "ja",   label: "Japanese" },
+  { code: "zh",   label: "Chinese" },
+  { code: "hi",   label: "Hindi" },
+  { code: "ar",   label: "Arabic" },
+];
 
 type Status = "idle" | "recording" | "transcribing";
 
 interface TranscriptEntry {
-  id?:       string;
+  id?:       number;
   text:      string;
   raw_text?: string;
   engine:    string;
   mode?:     string;
-  timestamp: number;
+  timestamp: string;
 }
 
 interface StatusPayload {
@@ -34,6 +40,7 @@ interface StatusPayload {
 interface Settings {
   groqApiKey: string;
   pythonCmd: string;
+  language: string;
 }
 
 const BAR_COUNT = 36;
@@ -230,8 +237,8 @@ const MiniWaveform = memo(function MiniWaveform({ status }: { status: Status }) 
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function formatTime(ts: number) {
-  return new Date(ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+function formatTime(ts: string) {
+  return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
 function formatWords(n: number) {
@@ -241,7 +248,7 @@ function formatWords(n: number) {
 function groupByDate(entries: TranscriptEntry[]) {
   const groups: Record<string, TranscriptEntry[]> = {};
   for (const e of entries) {
-    const d = new Date(e.timestamp * 1000);
+    const d = new Date(e.timestamp);
     const today = new Date();
     const yesterday = new Date(today);
     yesterday.setDate(today.getDate() - 1);
@@ -259,7 +266,7 @@ function totalWords(entries: TranscriptEntry[]) {
 }
 
 function activeDays(entries: TranscriptEntry[]) {
-  return new Set(entries.map((e) => new Date(e.timestamp * 1000).toDateString())).size;
+  return new Set(entries.map((e) => new Date(e.timestamp).toDateString())).size;
 }
 
 // ── Nav data ──────────────────────────────────────────────────────────────────
@@ -279,7 +286,7 @@ export default function App() {
   const [status, setStatus]         = useState<Status>("idle");
   const [statusMsg, setStatusMsg]   = useState("");
   const [transcripts, setTranscripts] = useState<TranscriptEntry[]>([]);
-  const [settings, setSettings]     = useState<Settings>({ groqApiKey: "", pythonCmd: "python" });
+  const [settings, setSettings]     = useState<Settings>({ groqApiKey: "", pythonCmd: "python", language: "auto" });
   const [saved, setSaved]           = useState(false);
   const [outputMode, setOutputMode] = useState<"prose" | "email" | "code">("prose");
   const [activeNav, setActiveNav]   = useState("home");
@@ -287,6 +294,8 @@ export default function App() {
   const [lightMode, setLightMode]   = useState(true);
   const [user, setUser]           = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<TranscriptEntry[] | null>(null);
 
   useEffect(() => {
     const unStatus = listen<StatusPayload>("status", (e) => {
@@ -299,27 +308,15 @@ export default function App() {
         try {
           setUser(u);
           if (u) {
-            saveUserProfile(u.uid, {
-              email:       u.email,
-              displayName: u.displayName,
-              photoURL:    u.photoURL,
-            }).catch(console.error);
-            const fsSettings = await loadSettings(u.uid);
-            if (fsSettings) {
-              setSettings(fsSettings);
-              await invoke("save_settings", {
-                groqApiKey: fsSettings.groqApiKey,
-                pythonCmd:  fsSettings.pythonCmd,
-              }).catch(() => {});
-            } else {
-              const rustSettings = await invoke<Settings>("get_settings").catch(() => null);
-              if (rustSettings) setSettings(rustSettings);
-            }
-            const fsTranscripts = await loadTranscripts(u.uid);
-            setTranscripts(fsTranscripts);
+            // Load settings from Rust (already loaded from disk on startup)
+            const rustSettings = await invoke<Settings>("get_settings").catch(() => null);
+            if (rustSettings) setSettings(rustSettings);
+            // Load transcripts from SQLite
+            const entries = await invoke<TranscriptEntry[]>("get_transcript_log").catch(() => []);
+            setTranscripts(entries);
           } else {
             setTranscripts([]);
-            setSettings({ groqApiKey: "", pythonCmd: "python" });
+            setSettings({ groqApiKey: "", pythonCmd: "python", language: "auto" });
           }
         } catch (err) {
           console.error("Auth change handler failed:", err);
@@ -337,22 +334,10 @@ export default function App() {
 
   useEffect(() => {
     if (!user) return;
-    const uid = user.uid;
 
     const unTranscript = listen<TranscriptEntry>("transcript", (e) => {
       const entry = e.payload;
       setTranscripts((prev) => [entry, ...prev].slice(0, 200));
-      saveTranscript(uid, {
-        text:      entry.text,
-        raw_text:  entry.raw_text ?? "",
-        engine:    entry.engine,
-        mode:      entry.mode ?? "prose",
-        timestamp: entry.timestamp,
-      }).then(id => {
-        setTranscripts(prev => prev.map(t =>
-          t.timestamp === entry.timestamp && !t.id ? { ...t, id } : t
-        ));
-      }).catch(console.error);
     });
 
     return () => { unTranscript.then((f) => f()); };
@@ -365,16 +350,14 @@ export default function App() {
   }, []);
 
   const saveSettings = useCallback(async () => {
-    await invoke("save_settings", { groqApiKey: settings.groqApiKey, pythonCmd: settings.pythonCmd });
-    if (user) {
-      await saveSettings_fs(user.uid, {
-        groqApiKey: settings.groqApiKey,
-        pythonCmd:  settings.pythonCmd,
-      }).catch(console.error);
-    }
+    await invoke("save_settings", {
+      groqApiKey: settings.groqApiKey,
+      pythonCmd:  settings.pythonCmd,
+      language:   settings.language,
+    });
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
-  }, [settings, user]);
+  }, [settings]);
 
   const copyEntry = useCallback((text: string, key: string) => {
     navigator.clipboard.writeText(text).then(() => {
@@ -383,21 +366,48 @@ export default function App() {
     }).catch(() => {});
   }, []);
 
-  const deleteEntry = useCallback((id: string | undefined) => {
-    if (!id || !user) return;
+  const deleteEntry = useCallback((id: number | undefined) => {
+    if (!id) return;
     setTranscripts(prev => prev.filter(t => t.id !== id));
-    deleteTranscript(user.uid, id).catch(console.error);
-  }, [user]);
+    invoke("delete_transcript", { id }).catch(console.error);
+  }, []);
 
   const clearAll = useCallback(async () => {
-    if (!user) return;
     setTranscripts([]);
-    await deleteAllTranscripts(user.uid).catch(console.error);
-  }, [user]);
+    setSearchResults(null);
+    setSearchQuery("");
+    await invoke("clear_all_db_transcripts").catch(console.error);
+  }, []);
+
+  const searchGenRef = useRef(0);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleSearch = useCallback((q: string) => {
+    setSearchQuery(q);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (q.trim() === "") {
+      setSearchResults(null);
+      return;
+    }
+    debounceRef.current = setTimeout(async () => {
+      const gen = ++searchGenRef.current;
+      try {
+        const results = await invoke<TranscriptEntry[]>("search_transcripts", { query: q });
+        if (gen === searchGenRef.current) {
+          setSearchResults(results);
+        }
+      } catch {
+        if (gen === searchGenRef.current) {
+          setSearchResults([]);
+        }
+      }
+    }, 200);
+  }, []);
 
   const words  = totalWords(transcripts);
   const days   = activeDays(transcripts);
-  const groups = groupByDate(transcripts);
+  const displayList = searchResults ?? transcripts;
+  const groups = groupByDate(displayList);
 
   if (!authReady) {
     return (
@@ -490,6 +500,20 @@ export default function App() {
                     placeholder="gsk_..."
                   />
                   <span className="field-hint">Fast cloud transcription via Groq Whisper</span>
+                </div>
+                <div className="field-group">
+                  <label className="field-label" htmlFor="lang-select">Transcription Language</label>
+                  <select
+                    id="lang-select"
+                    className="field-select"
+                    value={settings.language ?? "auto"}
+                    onChange={(e) => setSettings(s => ({ ...s, language: e.target.value }))}
+                  >
+                    {LANGUAGES.map((l) => (
+                      <option key={l.code} value={l.code}>{l.label}</option>
+                    ))}
+                  </select>
+                  <span className="field-hint">Override Whisper language detection</span>
                 </div>
               </div>
               <div className="settings-section">
@@ -684,29 +708,43 @@ export default function App() {
 
             {/* Transcript feed */}
             <div className="feed">
-              {transcripts.length > 0 && (
+              <input
+                className="search-input"
+                type="search"
+                placeholder="Search transcripts…"
+                value={searchQuery}
+                onChange={(e) => handleSearch(e.target.value)}
+              />
+              {displayList.length > 0 && searchResults === null && (
                 <div className="feed-header">
                   <button className="clear-all-btn" onClick={clearAll}>Clear all</button>
                 </div>
               )}
-              {transcripts.length === 0 ? (
-                <div className="empty">
-                  <div className="empty-icon">
-                    <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
-                      <rect x="9" y="2" width="6" height="12" rx="3" />
-                      <path d="M5 10a7 7 0 0 0 14 0" />
-                      <line x1="12" y1="19" x2="12" y2="22" />
-                      <line x1="8" y1="22" x2="16" y2="22" />
-                    </svg>
+              {displayList.length === 0 ? (
+                searchResults !== null ? (
+                  <div className="empty">
+                    <p className="empty-title">No results</p>
+                    <p className="empty-sub">Try a different search term</p>
                   </div>
-                  <p className="empty-title">No recordings yet</p>
-                  <p className="empty-sub">Press your hotkey and start speaking</p>
-                  <div className="empty-kbd-row">
-                    <kbd>Ctrl</kbd>
-                    <span className="empty-kbd-sep">+</span>
-                    <kbd>Win</kbd>
+                ) : (
+                  <div className="empty">
+                    <div className="empty-icon">
+                      <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="9" y="2" width="6" height="12" rx="3" />
+                        <path d="M5 10a7 7 0 0 0 14 0" />
+                        <line x1="12" y1="19" x2="12" y2="22" />
+                        <line x1="8" y1="22" x2="16" y2="22" />
+                      </svg>
+                    </div>
+                    <p className="empty-title">No recordings yet</p>
+                    <p className="empty-sub">Press your hotkey and start speaking</p>
+                    <div className="empty-kbd-row">
+                      <kbd>Ctrl</kbd>
+                      <span className="empty-kbd-sep">+</span>
+                      <kbd>Win</kbd>
+                    </div>
                   </div>
-                </div>
+                )
               ) : (
                 Object.entries(groups).map(([date, entries]) => (
                   <div key={date} className="date-group">

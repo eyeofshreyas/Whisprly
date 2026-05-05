@@ -1,3 +1,4 @@
+import { useState } from "react";
 import logo from "./assets/logo.png";
 import { signInWithGoogle } from "./auth";
 
@@ -17,12 +18,18 @@ function IcGoogle() {
 }
 
 export default function LoginScreen({ onSignIn }: Props) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError]     = useState<string | null>(null);
+
   async function handleGoogleSignIn() {
+    setLoading(true);
+    setError(null);
     try {
       await signInWithGoogle();
-      onSignIn();
-    } catch (err) {
-      console.error("Sign-in failed:", err);
+    } catch (err: any) {
+      console.error("Sign-in error:", err);
+      setError(typeof err === "string" ? err : (err?.message ?? "Sign-in failed. Check your internet connection."));
+      setLoading(false);
     }
   }
 
@@ -47,7 +54,7 @@ export default function LoginScreen({ onSignIn }: Props) {
         width: 480,
         height: 480,
         borderRadius: "50%",
-        background: "radial-gradient(circle, rgba(0,212,255,0.10) 0%, transparent 70%)",
+        background: "radial-gradient(circle, rgba(232,128,58,0.07) 0%, transparent 70%)",
         filter: "blur(60px)",
         pointerEvents: "none",
       }} />
@@ -69,18 +76,7 @@ export default function LoginScreen({ onSignIn }: Props) {
       }}>
         {/* Brand */}
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}>
-          <div style={{
-            width: 52,
-            height: 52,
-            borderRadius: 15,
-            background: "linear-gradient(135deg, var(--cyan), var(--violet))",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            boxShadow: "0 0 24px rgba(0,212,255,0.30)",
-          }}>
-            <img src={logo} alt="" style={{ width: 30, height: 30, objectFit: "contain", filter: "brightness(10) saturate(0)" }} />
-          </div>
+          <img src={logo} alt="Whisprly" style={{ width: 56, height: 56, objectFit: "contain" }} />
           <div style={{ textAlign: "center" }}>
             <h1 style={{
               fontFamily: "var(--font-display)",
@@ -136,8 +132,14 @@ export default function LoginScreen({ onSignIn }: Props) {
           }}
         >
           <IcGoogle />
-          Continue with Google
+          {loading ? "Opening browser…" : "Continue with Google"}
         </button>
+
+        {error && (
+          <p style={{ fontSize: 12, color: "var(--red)", textAlign: "center", lineHeight: 1.5 }}>
+            {error}
+          </p>
+        )}
 
         <p style={{ fontSize: 11, color: "var(--text-3)", textAlign: "center", lineHeight: 1.6 }}>
           By signing in you agree to our Terms of Service and Privacy Policy.

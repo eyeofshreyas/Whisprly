@@ -7,9 +7,11 @@ use tauri::{AppHandle, Emitter, Manager};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::WindowEvent;
+use rusqlite::Connection;
 
 mod audio;
 mod auto_type;
+mod db;
 mod hotkey;
 mod oauth;
 mod transcribe;
@@ -18,15 +20,6 @@ mod postprocess;
 pub enum HotkeyEvent {
     Start,
     Stop,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct TranscriptEntry {
-    pub text: String,
-    pub raw_text: String,
-    pub engine: String,
-    pub mode: String,
-    pub timestamp: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -42,24 +35,28 @@ pub struct AppSettings {
     pub sidecar_path: String,
     pub postprocess_model: String,
     pub output_mode: String,
+    pub language: String,
 }
 
 pub struct AppState {
-    pub settings: Arc<Mutex<AppSettings>>,
-    pub transcript_log: Arc<Mutex<Vec<TranscriptEntry>>>,
-    pub hotkey_tx: tokio::sync::mpsc::UnboundedSender<HotkeyEvent>,
+    pub settings:      Arc<Mutex<AppSettings>>,
+    pub db:            Arc<Mutex<Connection>>,
+    pub hotkey_tx:     tokio::sync::mpsc::UnboundedSender<HotkeyEvent>,
+    pub settings_path: std::path::PathBuf,
 }
 
 struct RecordingHandle {
     stop_flag: Arc<AtomicBool>,
-    thread: std::thread::JoinHandle<audio::RecordingResult>,
+    thread: std::thread::JoinHandle<()>,
+    chunk_rx: std::sync::mpsc::Receiver<Vec<f32>>,
 }
 
 fn start_recording() -> RecordingHandle {
     let stop_flag = Arc::new(AtomicBool::new(false));
     let stop_clone = stop_flag.clone();
-    let thread = std::thread::spawn(move || audio::record(stop_clone));
-    RecordingHandle { stop_flag, thread }
+    let (chunk_tx, chunk_rx) = std::sync::mpsc::channel();
+    let thread = std::thread::spawn(move || audio::record(stop_clone, chunk_tx));
+    RecordingHandle { stop_flag, thread, chunk_rx }
 }
 
 fn emit_status(app: &AppHandle, status: &str, message: Option<String>) {
@@ -97,7 +94,7 @@ async fn coordinator(
     mut rx: tokio::sync::mpsc::UnboundedReceiver<HotkeyEvent>,
     app: AppHandle,
     settings: Arc<Mutex<AppSettings>>,
-    log: Arc<Mutex<Vec<TranscriptEntry>>>,
+    db: Arc<Mutex<Connection>>,
 ) {
     let mut recording: Option<RecordingHandle> = None;
 
@@ -115,88 +112,102 @@ async fn coordinator(
                     handle.stop_flag.store(true, Ordering::SeqCst);
                     emit_status(&app, "transcribing", None);
 
-                    let result = tokio::task::spawn_blocking(move || {
-                        handle.thread.join().unwrap()
-                    })
-                    .await
-                    .unwrap();
+                    // Extract chunk_rx before moving handle.thread into spawn_blocking
+                    let chunk_rx = handle.chunk_rx;
+                    let join_result = tokio::task::spawn_blocking(move || handle.thread.join())
+                        .await;
+                    match join_result {
+                        Ok(Ok(())) => {}
+                        Ok(Err(_)) | Err(_) => {
+                            eprintln!("audio thread panicked");
+                            emit_status(&app, "idle", Some("Recording error".into()));
+                            hide_overlay(&app);
+                            continue;
+                        }
+                    }
 
-                    if result.samples.is_empty() {
+                    // Drain all chunks from the channel
+                    let chunks: Vec<Vec<f32>> = chunk_rx.try_iter().collect();
+
+                    if chunks.is_empty() {
                         emit_status(&app, "idle", Some("No audio captured".into()));
                         hide_overlay(&app);
                         continue;
                     }
 
-                    if audio::is_silent(&result.samples) {
-                        emit_status(&app, "idle", None);
+                    let s = settings.lock().unwrap().clone();
+                    let language = transcribe::language_param(&s.language);
+                    let mut used_engine = "local".to_string();
+                    let mut session_texts: Vec<String> = Vec::new();
+
+                    for chunk in chunks {
+                        if audio::is_silent(&chunk) { continue; }
+                        let wav = audio::to_wav_from_samples(chunk);
+
+                        let mut chunk_engine = "local";
+                        let text = if !s.groq_api_key.is_empty() {
+                            transcribe::groq(&wav, &s.groq_api_key, language.clone()).await.ok()
+                        } else {
+                            None
+                        };
+
+                        let text = match text {
+                            Some(t) if !t.is_empty() => {
+                                chunk_engine = "groq";
+                                Some(t)
+                            }
+                            _ => transcribe::local(&wav, &s.python_cmd, &s.sidecar_path, language.clone()).await.ok(),
+                        };
+
+                        if let Some(t) = text {
+                            if !t.is_empty() {
+                                used_engine = chunk_engine.to_string();
+                                session_texts.push(t);
+                            }
+                        }
+                    }
+
+                    if session_texts.is_empty() {
+                        emit_status(&app, "idle", Some("Nothing transcribed".into()));
                         hide_overlay(&app);
                         continue;
                     }
 
-                    let wav = audio::to_wav(result);
-                    let s = settings.lock().unwrap().clone();
+                    let raw_text = session_texts.join(" ");
 
-                    let transcript = if !s.groq_api_key.is_empty() {
-                        match transcribe::groq(&wav, &s.groq_api_key).await {
-                            Ok(t) => Some(("groq", t)),
-                            Err(e) => {
-                                eprintln!("Groq error: {e}");
-                                None
-                            }
-                        }
-                    } else {
-                        None
+                    let polished = postprocess::polish(
+                        &raw_text,
+                        &s.output_mode,
+                        &s.postprocess_model,
+                        &s.groq_api_key,
+                        &s.python_cmd,
+                    )
+                    .await
+                    .unwrap_or_else(|_| raw_text.clone());
+
+                    let p = polished.clone();
+                    if let Err(e) = tokio::task::spawn_blocking(move || auto_type::type_text(&p)).await {
+                        eprintln!("auto_type failed: {e:?}");
+                    }
+
+                    let db_entry = db::TranscriptEntry {
+                        id: 0,
+                        text: polished,
+                        raw_text: Some(raw_text),
+                        engine: used_engine.clone(),
+                        mode: s.output_mode.clone(),
+                        language: language.clone(),
+                        timestamp: chrono::Utc::now().to_rfc3339(),
                     };
-
-                    let transcript = if transcript.is_none() {
-                        match transcribe::local(&wav, &s.python_cmd, &s.sidecar_path).await {
-                            Ok(t) => Some(("local", t)),
-                            Err(e) => {
-                                eprintln!("Local error: {e}");
-                                None
-                            }
-                        }
-                    } else {
-                        transcript
-                    };
-
-                    match transcript {
-                        Some((engine, raw_text)) if !raw_text.is_empty() => {
-                            let polished = postprocess::polish(
-                                &raw_text,
-                                &s.output_mode,
-                                &s.postprocess_model,
-                                &s.groq_api_key,
-                                &s.python_cmd,
-                            )
-                            .await
-                            .unwrap_or_else(|_| raw_text.clone());
-
-                            let p = polished.clone();
-                            tokio::task::spawn_blocking(move || auto_type::type_text(&p))
-                                .await
-                                .ok();
-
-                            let entry = TranscriptEntry {
-                                text: polished,
-                                raw_text: raw_text.clone(),
-                                engine: engine.to_string(),
-                                mode: s.output_mode.clone(),
-                                timestamp: std::time::SystemTime::now()
-                                    .duration_since(std::time::UNIX_EPOCH)
-                                    .unwrap()
-                                    .as_secs(),
-                            };
-                            log.lock().unwrap().push(entry.clone());
-                            app.emit("transcript", entry).ok();
-                            emit_status(&app, "idle", None);
-                            hide_overlay(&app);
-                        }
-                        _ => {
-                            emit_status(&app, "idle", Some("Nothing transcribed".into()));
-                            hide_overlay(&app);
+                    {
+                        let conn = db.lock().unwrap();
+                        if let Err(e) = db::insert_transcript(&conn, &db_entry) {
+                            eprintln!("Failed to save transcript to DB: {e}");
                         }
                     }
+                    app.emit("transcript", &db_entry).ok();
+                    emit_status(&app, "idle", None);
+                    hide_overlay(&app);
                 }
             }
         }
@@ -213,10 +224,22 @@ async fn save_settings(
     state: tauri::State<'_, AppState>,
     groq_api_key: String,
     python_cmd: String,
+    language: String,
 ) -> Result<(), String> {
-    let mut s = state.settings.lock().unwrap();
-    s.groq_api_key = groq_api_key;
-    s.python_cmd = python_cmd;
+    let path = {
+        let mut s = state.settings.lock().unwrap();
+        s.groq_api_key = groq_api_key.clone();
+        s.python_cmd   = python_cmd.clone();
+        s.language     = language.clone();
+        state.settings_path.clone()
+    };
+    let json = serde_json::json!({
+        "groqApiKey": groq_api_key,
+        "pythonCmd":  python_cmd,
+        "language":   language,
+        "outputMode": state.settings.lock().unwrap().output_mode,
+    });
+    std::fs::write(&path, json.to_string()).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -226,14 +249,28 @@ async fn get_settings(state: tauri::State<'_, AppState>) -> Result<serde_json::V
     Ok(serde_json::json!({
         "groqApiKey": s.groq_api_key,
         "pythonCmd": s.python_cmd,
+        "language": s.language,
     }))
 }
 
 #[tauri::command]
-async fn get_transcript_log(
-    state: tauri::State<'_, AppState>,
-) -> Result<Vec<TranscriptEntry>, String> {
-    Ok(state.transcript_log.lock().unwrap().clone())
+fn get_transcript_log(state: tauri::State<'_, AppState>) -> Vec<db::TranscriptEntry> {
+    let conn = state.db.lock().unwrap();
+    db::get_transcripts(&conn, 200).unwrap_or_default()
+}
+
+#[tauri::command]
+fn search_transcripts(query: String, state: tauri::State<'_, AppState>) -> Vec<db::TranscriptEntry> {
+    let conn = state.db.lock().unwrap();
+    db::search_transcripts(&conn, &query).unwrap_or_default()
+}
+
+#[tauri::command]
+fn clear_all_db_transcripts(state: tauri::State<'_, AppState>) {
+    let conn = state.db.lock().unwrap();
+    if let Err(e) = db::clear_all_transcripts(&conn) {
+        eprintln!("Failed to clear DB transcripts: {e}");
+    }
 }
 
 #[tauri::command]
@@ -244,10 +281,27 @@ fn get_output_mode(state: tauri::State<'_, AppState>) -> String {
 #[tauri::command]
 fn set_output_mode(state: tauri::State<'_, AppState>, mode: String) -> Result<(), String> {
     if ["prose", "email", "code"].contains(&mode.as_str()) {
-        state.settings.lock().unwrap().output_mode = mode;
+        state.settings.lock().unwrap().output_mode = mode.clone();
+        // Persist
+        let s = state.settings.lock().unwrap().clone();
+        let json = serde_json::json!({
+            "groqApiKey": s.groq_api_key,
+            "pythonCmd":  s.python_cmd,
+            "language":   s.language,
+            "outputMode": s.output_mode,
+        });
+        std::fs::write(&state.settings_path, json.to_string()).ok();
         Ok(())
     } else {
         Err(format!("invalid mode: {mode}"))
+    }
+}
+
+#[tauri::command]
+fn delete_transcript(id: i64, state: tauri::State<'_, AppState>) {
+    let conn = state.db.lock().unwrap();
+    if let Err(e) = db::delete_transcript(&conn, id) {
+        eprintln!("Failed to delete transcript {id}: {e}");
     }
 }
 
@@ -274,23 +328,46 @@ pub fn run() {
         sidecar_path,
         postprocess_model: "llama-3.1-8b-instant".to_string(),
         output_mode: "prose".to_string(),
+        language: "auto".to_string(),
     }));
-    let transcript_log = Arc::new(Mutex::new(Vec::<TranscriptEntry>::new()));
 
     tauri::Builder::default()
         .setup(|app| {
+            let db_path = app.path().app_data_dir()
+                .expect("no app data dir")
+                .join("transcripts.db");
+            std::fs::create_dir_all(db_path.parent().unwrap()).ok();
+            let conn = Connection::open(&db_path).expect("open SQLite db");
+            db::init_db(&conn).expect("init db schema");
+            let db = Arc::new(Mutex::new(conn));
+
+            // Load persisted settings if they exist
+            let settings_file = app.path().app_data_dir()
+                .expect("no app data dir")
+                .join("settings.json");
+            if let Ok(data) = std::fs::read_to_string(&settings_file) {
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&data) {
+                    let mut s = settings.lock().unwrap();
+                    if let Some(v) = json["groqApiKey"].as_str() { s.groq_api_key = v.to_string(); }
+                    if let Some(v) = json["pythonCmd"].as_str()  { s.python_cmd   = v.to_string(); }
+                    if let Some(v) = json["language"].as_str()   { s.language     = v.to_string(); }
+                    if let Some(v) = json["outputMode"].as_str() { s.output_mode  = v.to_string(); }
+                }
+            }
+
             let app_handle = app.handle().clone();
             let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<HotkeyEvent>();
             let cmd_tx = tx.clone();
 
             app.manage(AppState {
                 settings: settings.clone(),
-                transcript_log: transcript_log.clone(),
+                db: db.clone(),
                 hotkey_tx: cmd_tx,
+                settings_path: settings_file.clone(),
             });
 
             std::thread::spawn(move || hotkey::start_listener(tx));
-            tauri::async_runtime::spawn(coordinator(rx, app_handle.clone(), settings, transcript_log));
+            tauri::async_runtime::spawn(coordinator(rx, app_handle.clone(), settings, db));
 
             // ── System tray ──
             let open_i = MenuItem::with_id(app, "open", "Open Whisprly", true, None::<&str>)?;
@@ -349,6 +426,9 @@ pub fn run() {
             save_settings,
             get_settings,
             get_transcript_log,
+            search_transcripts,
+            clear_all_db_transcripts,
+            delete_transcript,
             stop_recording,
             oauth::start_google_oauth,
             get_output_mode,
