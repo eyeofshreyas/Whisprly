@@ -13,14 +13,14 @@ pub struct RecordingResult {
     pub channels: u16,
 }
 
-pub fn record(stop: Arc<AtomicBool>) -> RecordingResult {
+pub fn record(stop: Arc<AtomicBool>, chunk_tx: std::sync::mpsc::Sender<Vec<f32>>) {
     let host = cpal::default_host();
 
     let device = match host.default_input_device() {
         Some(d) => d,
         None => {
             eprintln!("No input device found");
-            return RecordingResult { samples: vec![], sample_rate: 16000, channels: 1 };
+            return;
         }
     };
 
@@ -28,7 +28,7 @@ pub fn record(stop: Arc<AtomicBool>) -> RecordingResult {
         Ok(c) => c,
         Err(e) => {
             eprintln!("Could not get input config: {e}");
-            return RecordingResult { samples: vec![], sample_rate: 16000, channels: 1 };
+            return;
         }
     };
 
@@ -78,7 +78,7 @@ pub fn record(stop: Arc<AtomicBool>) -> RecordingResult {
             ),
             fmt => {
                 eprintln!("Unsupported sample format: {fmt:?}");
-                return RecordingResult { samples: vec![], sample_rate, channels };
+                return;
             }
         }
     };
@@ -87,13 +87,13 @@ pub fn record(stop: Arc<AtomicBool>) -> RecordingResult {
         Ok(s) => s,
         Err(e) => {
             eprintln!("Failed to build input stream: {e}");
-            return RecordingResult { samples: vec![], sample_rate, channels };
+            return;
         }
     };
 
     if let Err(e) = stream.play() {
         eprintln!("Failed to start stream: {e}");
-        return RecordingResult { samples: vec![], sample_rate, channels };
+        return;
     }
 
     while !stop.load(Ordering::Relaxed) {
@@ -102,8 +102,21 @@ pub fn record(stop: Arc<AtomicBool>) -> RecordingResult {
 
     drop(stream);
 
-    let data = samples.lock().unwrap().clone();
-    RecordingResult { samples: data, sample_rate, channels }
+    let raw_samples = samples.lock().unwrap().clone();
+
+    // Convert to mono and resample to 16kHz
+    let mono = to_mono(&raw_samples, channels as usize);
+    let resampled = resample_to_16k(&mono, sample_rate);
+
+    // Process through VAD + Chunker
+    let mut chunker = Chunker::new(chunk_tx);
+    for frame in resampled.chunks(480) {
+        if frame.len() == 480 {
+            let is_speech = is_speech_frame(frame);
+            chunker.push_frame(frame, is_speech);
+        }
+    }
+    chunker.flush(); // emit any in-progress speech on hotkey release
 }
 
 /// Returns true when the recording is effectively silent (no speech detected).
@@ -183,6 +196,29 @@ pub fn to_wav(result: RecordingResult) -> Vec<u8> {
         writer.finalize().expect("WAV finalize failed");
     }
 
+    buf
+}
+
+/// Encode a 16kHz mono f32 sample buffer to WAV bytes.
+/// Used by the coordinator to encode Chunker output for transcription.
+pub fn to_wav_from_samples(samples: Vec<f32>) -> Vec<u8> {
+    use std::io::Cursor;
+    let spec = hound::WavSpec {
+        channels: 1,
+        sample_rate: 16000,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut buf: Vec<u8> = Vec::new();
+    {
+        let cursor = Cursor::new(&mut buf);
+        let mut writer = hound::WavWriter::new(cursor, spec).expect("WAV writer init failed");
+        for &s in &samples {
+            let sample = (s * i16::MAX as f32).clamp(i16::MIN as f32, i16::MAX as f32) as i16;
+            writer.write_sample(sample).expect("WAV write failed");
+        }
+        writer.finalize().expect("WAV finalize failed");
+    }
     buf
 }
 

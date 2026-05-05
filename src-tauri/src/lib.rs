@@ -46,14 +46,16 @@ pub struct AppState {
 
 struct RecordingHandle {
     stop_flag: Arc<AtomicBool>,
-    thread: std::thread::JoinHandle<audio::RecordingResult>,
+    thread: std::thread::JoinHandle<()>,
+    chunk_rx: std::sync::mpsc::Receiver<Vec<f32>>,
 }
 
 fn start_recording() -> RecordingHandle {
     let stop_flag = Arc::new(AtomicBool::new(false));
     let stop_clone = stop_flag.clone();
-    let thread = std::thread::spawn(move || audio::record(stop_clone));
-    RecordingHandle { stop_flag, thread }
+    let (chunk_tx, chunk_rx) = std::sync::mpsc::channel();
+    let thread = std::thread::spawn(move || audio::record(stop_clone, chunk_tx));
+    RecordingHandle { stop_flag, thread, chunk_rx }
 }
 
 fn emit_status(app: &AppHandle, status: &str, message: Option<String>) {
@@ -109,93 +111,86 @@ async fn coordinator(
                     handle.stop_flag.store(true, Ordering::SeqCst);
                     emit_status(&app, "transcribing", None);
 
-                    let result = tokio::task::spawn_blocking(move || {
-                        handle.thread.join().unwrap()
-                    })
-                    .await
-                    .unwrap();
+                    // Extract chunk_rx before moving handle.thread into spawn_blocking
+                    let chunk_rx = handle.chunk_rx;
+                    tokio::task::spawn_blocking(move || handle.thread.join().unwrap())
+                        .await
+                        .unwrap();
 
-                    if result.samples.is_empty() {
+                    // Drain all chunks from the channel
+                    let chunks: Vec<Vec<f32>> = chunk_rx.try_iter().collect();
+
+                    if chunks.is_empty() {
                         emit_status(&app, "idle", Some("No audio captured".into()));
                         hide_overlay(&app);
                         continue;
                     }
 
-                    if audio::is_silent(&result.samples) {
-                        emit_status(&app, "idle", None);
+                    let s = settings.lock().unwrap().clone();
+                    let language = transcribe::language_param(&s.language);
+                    let mut session_texts: Vec<String> = Vec::new();
+
+                    for chunk in chunks {
+                        if audio::is_silent(&chunk) { continue; }
+                        let wav = audio::to_wav_from_samples(chunk);
+
+                        let text = if !s.groq_api_key.is_empty() {
+                            transcribe::groq(&wav, &s.groq_api_key, language.clone()).await.ok()
+                        } else {
+                            None
+                        };
+
+                        let text = match text {
+                            Some(t) if !t.is_empty() => Some(t),
+                            _ => transcribe::local(&wav, &s.python_cmd, &s.sidecar_path, language.clone()).await.ok(),
+                        };
+
+                        if let Some(t) = text {
+                            if !t.is_empty() {
+                                session_texts.push(t);
+                            }
+                        }
+                    }
+
+                    if session_texts.is_empty() {
+                        emit_status(&app, "idle", Some("Nothing transcribed".into()));
                         hide_overlay(&app);
                         continue;
                     }
 
-                    let wav = audio::to_wav(result);
-                    let s = settings.lock().unwrap().clone();
+                    let raw_text = session_texts.join(" ");
 
-                    let language = transcribe::language_param(&s.language);
+                    let polished = postprocess::polish(
+                        &raw_text,
+                        &s.output_mode,
+                        &s.postprocess_model,
+                        &s.groq_api_key,
+                        &s.python_cmd,
+                    )
+                    .await
+                    .unwrap_or_else(|_| raw_text.clone());
 
-                    let transcript = if !s.groq_api_key.is_empty() {
-                        match transcribe::groq(&wav, &s.groq_api_key, language.clone()).await {
-                            Ok(t) => Some(("groq", t)),
-                            Err(e) => {
-                                eprintln!("Groq error: {e}");
-                                None
-                            }
-                        }
-                    } else {
-                        None
+                    let p = polished.clone();
+                    tokio::task::spawn_blocking(move || auto_type::type_text(&p))
+                        .await
+                        .ok();
+
+                    let db_entry = db::TranscriptEntry {
+                        id: 0,
+                        text: polished,
+                        raw_text: Some(raw_text),
+                        engine: if s.groq_api_key.is_empty() { "local" } else { "groq" }.to_string(),
+                        mode: s.output_mode.clone(),
+                        language: language.clone(),
+                        timestamp: chrono::Utc::now().to_rfc3339(),
                     };
-
-                    let transcript = if transcript.is_none() {
-                        match transcribe::local(&wav, &s.python_cmd, &s.sidecar_path, language.clone()).await {
-                            Ok(t) => Some(("local", t)),
-                            Err(e) => {
-                                eprintln!("Local error: {e}");
-                                None
-                            }
-                        }
-                    } else {
-                        transcript
-                    };
-
-                    match transcript {
-                        Some((engine, raw_text)) if !raw_text.is_empty() => {
-                            let polished = postprocess::polish(
-                                &raw_text,
-                                &s.output_mode,
-                                &s.postprocess_model,
-                                &s.groq_api_key,
-                                &s.python_cmd,
-                            )
-                            .await
-                            .unwrap_or_else(|_| raw_text.clone());
-
-                            let entry_text = polished.clone();
-                            let p = polished.clone();
-                            tokio::task::spawn_blocking(move || auto_type::type_text(&p))
-                                .await
-                                .ok();
-
-                            let db_entry = db::TranscriptEntry {
-                                id: 0,
-                                text: entry_text.clone(),
-                                raw_text: Some(raw_text.clone()),
-                                engine: engine.to_string(),
-                                mode: s.output_mode.clone(),
-                                language: language.clone(),
-                                timestamp: chrono::Utc::now().to_rfc3339(),
-                            };
-                            {
-                                let conn = db.lock().unwrap();
-                                db::insert_transcript(&conn, &db_entry).ok();
-                            }
-                            app.emit("transcript", &db_entry).ok();
-                            emit_status(&app, "idle", None);
-                            hide_overlay(&app);
-                        }
-                        _ => {
-                            emit_status(&app, "idle", Some("Nothing transcribed".into()));
-                            hide_overlay(&app);
-                        }
+                    {
+                        let conn = db.lock().unwrap();
+                        db::insert_transcript(&conn, &db_entry).ok();
                     }
+                    app.emit("transcript", &db_entry).ok();
+                    emit_status(&app, "idle", None);
+                    hide_overlay(&app);
                 }
             }
         }
