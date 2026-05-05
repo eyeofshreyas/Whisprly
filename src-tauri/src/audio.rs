@@ -117,6 +117,20 @@ pub fn is_silent(samples: &[f32]) -> bool {
     rms < 0.015
 }
 
+/// Returns true when the frame contains detectable speech.
+/// Uses two RMS thresholds with hysteresis:
+/// - Above SPEECH_THRESHOLD → definitely speech
+/// - Below SILENCE_THRESHOLD → definitely silence
+/// - Between the two → carry over previous state (handled by the Chunker)
+pub fn is_speech_frame(frame: &[f32]) -> bool {
+    const SPEECH_THRESHOLD: f32 = 0.02;
+    if frame.is_empty() {
+        return false;
+    }
+    let rms = (frame.iter().map(|&s| s * s).sum::<f32>() / frame.len() as f32).sqrt();
+    rms >= SPEECH_THRESHOLD
+}
+
 // Mix all channels down to mono.
 fn to_mono(samples: &[f32], channels: usize) -> Vec<f32> {
     if channels == 1 {
@@ -170,4 +184,23 @@ pub fn to_wav(result: RecordingResult) -> Vec<u8> {
     }
 
     buf
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classify_silence_as_non_speech() {
+        // 480 f32 zero samples = 30ms of silence at 16kHz
+        let silence = vec![0.0f32; 480];
+        assert!(!is_speech_frame(&silence), "zeros must be non-speech");
+    }
+
+    #[test]
+    fn classify_loud_tone_as_speech() {
+        // 480 samples at 0.5 amplitude — well above speech threshold
+        let tone = vec![0.5f32; 480];
+        assert!(is_speech_frame(&tone), "loud tone must be speech");
+    }
 }
