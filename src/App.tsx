@@ -4,15 +4,6 @@ import { memo, useEffect, useState, useCallback, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { onAuthChange, signOutUser, type User } from "./auth";
-import {
-  saveSettings as saveSettings_fs,
-  loadSettings,
-  saveTranscript,
-  loadTranscripts,
-  deleteTranscript,
-  deleteAllTranscripts,
-  saveUserProfile,
-} from "./firestore";
 import LoginScreen from "./LoginScreen";
 
 const LANGUAGES = [
@@ -33,7 +24,7 @@ const LANGUAGES = [
 type Status = "idle" | "recording" | "transcribing";
 
 interface TranscriptEntry {
-  id?:       string | number;
+  id?:       number;
   text:      string;
   raw_text?: string;
   engine:    string;
@@ -317,25 +308,12 @@ export default function App() {
         try {
           setUser(u);
           if (u) {
-            saveUserProfile(u.uid, {
-              email:       u.email,
-              displayName: u.displayName,
-              photoURL:    u.photoURL,
-            }).catch(console.error);
-            const fsSettings = await loadSettings(u.uid);
-            if (fsSettings) {
-              setSettings(fsSettings);
-              await invoke("save_settings", {
-                groqApiKey: fsSettings.groqApiKey,
-                pythonCmd:  fsSettings.pythonCmd,
-                language:   fsSettings.language,
-              }).catch(() => {});
-            } else {
-              const rustSettings = await invoke<Settings>("get_settings").catch(() => null);
-              if (rustSettings) setSettings(rustSettings);
-            }
-            const fsTranscripts = await loadTranscripts(u.uid);
-            setTranscripts(fsTranscripts);
+            // Load settings from Rust (already loaded from disk on startup)
+            const rustSettings = await invoke<Settings>("get_settings").catch(() => null);
+            if (rustSettings) setSettings(rustSettings);
+            // Load transcripts from SQLite
+            const entries = await invoke<TranscriptEntry[]>("get_transcript_log").catch(() => []);
+            setTranscripts(entries);
           } else {
             setTranscripts([]);
             setSettings({ groqApiKey: "", pythonCmd: "python", language: "auto" });
@@ -356,22 +334,10 @@ export default function App() {
 
   useEffect(() => {
     if (!user) return;
-    const uid = user.uid;
 
     const unTranscript = listen<TranscriptEntry>("transcript", (e) => {
       const entry = e.payload;
       setTranscripts((prev) => [entry, ...prev].slice(0, 200));
-      saveTranscript(uid, {
-        text:      entry.text,
-        raw_text:  entry.raw_text ?? "",
-        engine:    entry.engine,
-        mode:      entry.mode ?? "prose",
-        timestamp: entry.timestamp,
-      }).then(id => {
-        setTranscripts(prev => prev.map(t =>
-          t.timestamp === entry.timestamp && !t.id ? { ...t, id } : t
-        ));
-      }).catch(console.error);
     });
 
     return () => { unTranscript.then((f) => f()); };
@@ -384,17 +350,14 @@ export default function App() {
   }, []);
 
   const saveSettings = useCallback(async () => {
-    await invoke("save_settings", { groqApiKey: settings.groqApiKey, pythonCmd: settings.pythonCmd, language: settings.language });
-    if (user) {
-      await saveSettings_fs(user.uid, {
-        groqApiKey: settings.groqApiKey,
-        pythonCmd:  settings.pythonCmd,
-        language:   settings.language,
-      }).catch(console.error);
-    }
+    await invoke("save_settings", {
+      groqApiKey: settings.groqApiKey,
+      pythonCmd:  settings.pythonCmd,
+      language:   settings.language,
+    });
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
-  }, [settings, user]);
+  }, [settings]);
 
   const copyEntry = useCallback((text: string, key: string) => {
     navigator.clipboard.writeText(text).then(() => {
@@ -403,26 +366,18 @@ export default function App() {
     }).catch(() => {});
   }, []);
 
-  const deleteEntry = useCallback((id: string | number | undefined) => {
-    if (!id || !user) return;
+  const deleteEntry = useCallback((id: number | undefined) => {
+    if (!id) return;
     setTranscripts(prev => prev.filter(t => t.id !== id));
-    // Only delete from Firestore for string IDs (Firestore doc IDs)
-    // SQLite entries have numeric IDs and are not stored in Firestore individually
-    if (typeof id === "string") {
-      deleteTranscript(user.uid, id).catch(console.error);
-    }
-  }, [user]);
+    invoke("delete_transcript", { id }).catch(console.error);
+  }, []);
 
   const clearAll = useCallback(async () => {
-    if (!user) return;
     setTranscripts([]);
     setSearchResults(null);
     setSearchQuery("");
-    await Promise.all([
-      deleteAllTranscripts(user.uid).catch(console.error),
-      invoke("clear_all_db_transcripts").catch(console.error),
-    ]);
-  }, [user]);
+    await invoke("clear_all_db_transcripts").catch(console.error);
+  }, []);
 
   const searchGenRef = useRef(0);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);

@@ -39,9 +39,10 @@ pub struct AppSettings {
 }
 
 pub struct AppState {
-    pub settings: Arc<Mutex<AppSettings>>,
-    pub db: Arc<Mutex<Connection>>,
-    pub hotkey_tx: tokio::sync::mpsc::UnboundedSender<HotkeyEvent>,
+    pub settings:      Arc<Mutex<AppSettings>>,
+    pub db:            Arc<Mutex<Connection>>,
+    pub hotkey_tx:     tokio::sync::mpsc::UnboundedSender<HotkeyEvent>,
+    pub settings_path: std::path::PathBuf,
 }
 
 struct RecordingHandle {
@@ -225,10 +226,20 @@ async fn save_settings(
     python_cmd: String,
     language: String,
 ) -> Result<(), String> {
-    let mut s = state.settings.lock().unwrap();
-    s.groq_api_key = groq_api_key;
-    s.python_cmd = python_cmd;
-    s.language = language;
+    let path = {
+        let mut s = state.settings.lock().unwrap();
+        s.groq_api_key = groq_api_key.clone();
+        s.python_cmd   = python_cmd.clone();
+        s.language     = language.clone();
+        state.settings_path.clone()
+    };
+    let json = serde_json::json!({
+        "groqApiKey": groq_api_key,
+        "pythonCmd":  python_cmd,
+        "language":   language,
+        "outputMode": state.settings.lock().unwrap().output_mode,
+    });
+    std::fs::write(&path, json.to_string()).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -270,10 +281,27 @@ fn get_output_mode(state: tauri::State<'_, AppState>) -> String {
 #[tauri::command]
 fn set_output_mode(state: tauri::State<'_, AppState>, mode: String) -> Result<(), String> {
     if ["prose", "email", "code"].contains(&mode.as_str()) {
-        state.settings.lock().unwrap().output_mode = mode;
+        state.settings.lock().unwrap().output_mode = mode.clone();
+        // Persist
+        let s = state.settings.lock().unwrap().clone();
+        let json = serde_json::json!({
+            "groqApiKey": s.groq_api_key,
+            "pythonCmd":  s.python_cmd,
+            "language":   s.language,
+            "outputMode": s.output_mode,
+        });
+        std::fs::write(&state.settings_path, json.to_string()).ok();
         Ok(())
     } else {
         Err(format!("invalid mode: {mode}"))
+    }
+}
+
+#[tauri::command]
+fn delete_transcript(id: i64, state: tauri::State<'_, AppState>) {
+    let conn = state.db.lock().unwrap();
+    if let Err(e) = db::delete_transcript(&conn, id) {
+        eprintln!("Failed to delete transcript {id}: {e}");
     }
 }
 
@@ -313,6 +341,20 @@ pub fn run() {
             db::init_db(&conn).expect("init db schema");
             let db = Arc::new(Mutex::new(conn));
 
+            // Load persisted settings if they exist
+            let settings_file = app.path().app_data_dir()
+                .expect("no app data dir")
+                .join("settings.json");
+            if let Ok(data) = std::fs::read_to_string(&settings_file) {
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&data) {
+                    let mut s = settings.lock().unwrap();
+                    if let Some(v) = json["groqApiKey"].as_str() { s.groq_api_key = v.to_string(); }
+                    if let Some(v) = json["pythonCmd"].as_str()  { s.python_cmd   = v.to_string(); }
+                    if let Some(v) = json["language"].as_str()   { s.language     = v.to_string(); }
+                    if let Some(v) = json["outputMode"].as_str() { s.output_mode  = v.to_string(); }
+                }
+            }
+
             let app_handle = app.handle().clone();
             let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<HotkeyEvent>();
             let cmd_tx = tx.clone();
@@ -321,6 +363,7 @@ pub fn run() {
                 settings: settings.clone(),
                 db: db.clone(),
                 hotkey_tx: cmd_tx,
+                settings_path: settings_file.clone(),
             });
 
             std::thread::spawn(move || hotkey::start_listener(tx));
@@ -385,6 +428,7 @@ pub fn run() {
             get_transcript_log,
             search_transcripts,
             clear_all_db_transcripts,
+            delete_transcript,
             stop_recording,
             oauth::start_google_oauth,
             get_output_mode,

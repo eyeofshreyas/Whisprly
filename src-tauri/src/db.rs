@@ -117,6 +117,12 @@ pub fn clear_all_transcripts(conn: &Connection) -> Result<()> {
     ")
 }
 
+pub fn delete_transcript(conn: &Connection, id: i64) -> Result<()> {
+    conn.execute("DELETE FROM transcripts WHERE id = ?1", params![id])?;
+    conn.execute("DELETE FROM transcripts_fts WHERE rowid = ?1", params![id])?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

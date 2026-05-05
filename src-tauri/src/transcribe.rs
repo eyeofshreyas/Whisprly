@@ -15,6 +15,8 @@ const HALLUCINATIONS: &[&str] = &[
     "[background noise]",
     "(background noise)",
     "...",
+    "transcribe with correct punctuation",
+    "voice dictation",
 ];
 
 fn is_hallucination(text: &str) -> bool {
@@ -42,8 +44,8 @@ pub async fn groq(wav_bytes: &[u8], api_key: &str, language: Option<String>) -> 
     let form = reqwest::multipart::Form::new()
         .text("model", "whisper-large-v3-turbo")
         .text("response_format", "text")
-        // Biases Whisper toward proper punctuation and capitalisation.
-        .text("prompt", "Voice dictation. Transcribe with correct punctuation and capitalisation.")
+        // Short prompt biases Whisper toward punctuation without leaking into output.
+        .text("prompt", "Hello.")
         .part("file", file_part);
 
     let form = match language {
