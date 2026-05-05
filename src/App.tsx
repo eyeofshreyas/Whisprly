@@ -33,7 +33,7 @@ const LANGUAGES = [
 type Status = "idle" | "recording" | "transcribing";
 
 interface TranscriptEntry {
-  id?:       string;
+  id?:       string | number;
   text:      string;
   raw_text?: string;
   engine:    string;
@@ -403,16 +403,25 @@ export default function App() {
     }).catch(() => {});
   }, []);
 
-  const deleteEntry = useCallback((id: string | undefined) => {
+  const deleteEntry = useCallback((id: string | number | undefined) => {
     if (!id || !user) return;
     setTranscripts(prev => prev.filter(t => t.id !== id));
-    deleteTranscript(user.uid, id).catch(console.error);
+    // Only delete from Firestore for string IDs (Firestore doc IDs)
+    // SQLite entries have numeric IDs and are not stored in Firestore individually
+    if (typeof id === "string") {
+      deleteTranscript(user.uid, id).catch(console.error);
+    }
   }, [user]);
 
   const clearAll = useCallback(async () => {
     if (!user) return;
     setTranscripts([]);
-    await deleteAllTranscripts(user.uid).catch(console.error);
+    setSearchResults(null);
+    setSearchQuery("");
+    await Promise.all([
+      deleteAllTranscripts(user.uid).catch(console.error),
+      invoke("clear_all_db_transcripts").catch(console.error),
+    ]);
   }, [user]);
 
   const searchGenRef = useRef(0);

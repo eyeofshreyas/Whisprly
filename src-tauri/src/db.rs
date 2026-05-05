@@ -87,6 +87,8 @@ pub fn search_transcripts(conn: &Connection, query: &str) -> Result<Vec<Transcri
     if query.is_empty() {
         return Ok(vec![]);
     }
+    // Wrap in double quotes for literal phrase match — prevents FTS5 operator injection
+    let safe_query = format!("\"{}\"", query.replace('"', " "));
     let mut stmt = conn.prepare(
         "SELECT t.id, t.text, t.raw_text, t.engine, t.mode, t.language, t.timestamp
          FROM transcripts t
@@ -94,7 +96,7 @@ pub fn search_transcripts(conn: &Connection, query: &str) -> Result<Vec<Transcri
          WHERE transcripts_fts MATCH ?1
          ORDER BY rank"
     )?;
-    let rows = stmt.query_map(params![query], |row| {
+    let rows = stmt.query_map(params![safe_query], |row| {
         Ok(TranscriptEntry {
             id: row.get(0)?,
             text: row.get(1)?,
@@ -106,6 +108,13 @@ pub fn search_transcripts(conn: &Connection, query: &str) -> Result<Vec<Transcri
         })
     })?;
     rows.collect()
+}
+
+pub fn clear_all_transcripts(conn: &Connection) -> Result<()> {
+    conn.execute_batch("
+        DELETE FROM transcripts;
+        DELETE FROM transcripts_fts;
+    ")
 }
 
 #[cfg(test)]

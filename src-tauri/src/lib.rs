@@ -200,7 +200,9 @@ async fn coordinator(
                     };
                     {
                         let conn = db.lock().unwrap();
-                        db::insert_transcript(&conn, &db_entry).ok();
+                        if let Err(e) = db::insert_transcript(&conn, &db_entry) {
+                            eprintln!("Failed to save transcript to DB: {e}");
+                        }
                     }
                     app.emit("transcript", &db_entry).ok();
                     emit_status(&app, "idle", None);
@@ -250,6 +252,14 @@ fn get_transcript_log(state: tauri::State<'_, AppState>) -> Vec<db::TranscriptEn
 fn search_transcripts(query: String, state: tauri::State<'_, AppState>) -> Vec<db::TranscriptEntry> {
     let conn = state.db.lock().unwrap();
     db::search_transcripts(&conn, &query).unwrap_or_default()
+}
+
+#[tauri::command]
+fn clear_all_db_transcripts(state: tauri::State<'_, AppState>) {
+    let conn = state.db.lock().unwrap();
+    if let Err(e) = db::clear_all_transcripts(&conn) {
+        eprintln!("Failed to clear DB transcripts: {e}");
+    }
 }
 
 #[tauri::command]
@@ -374,6 +384,7 @@ pub fn run() {
             get_settings,
             get_transcript_log,
             search_transcripts,
+            clear_all_db_transcripts,
             stop_recording,
             oauth::start_google_oauth,
             get_output_mode,
