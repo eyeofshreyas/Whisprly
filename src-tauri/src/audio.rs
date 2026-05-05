@@ -43,7 +43,11 @@ pub fn record(stop: Arc<AtomicBool>, chunk_tx: std::sync::mpsc::Sender<Vec<f32>>
         match config.sample_format() {
             SampleFormat::F32 => device.build_input_stream(
                 &config.into(),
-                move |data: &[f32], _| { buf.lock().unwrap().extend_from_slice(data); },
+                move |data: &[f32], _| {
+                    if let Ok(mut b) = buf.lock() {
+                        b.extend_from_slice(data);
+                    }
+                },
                 err_fn,
                 None,
             ),
@@ -51,7 +55,9 @@ pub fn record(stop: Arc<AtomicBool>, chunk_tx: std::sync::mpsc::Sender<Vec<f32>>
                 &config.into(),
                 move |data: &[i16], _| {
                     let floats: Vec<f32> = data.iter().map(|&s| s as f32 / i16::MAX as f32).collect();
-                    buf.lock().unwrap().extend(floats);
+                    if let Ok(mut b) = buf.lock() {
+                        b.extend(floats);
+                    }
                 },
                 err_fn,
                 None,
@@ -62,7 +68,9 @@ pub fn record(stop: Arc<AtomicBool>, chunk_tx: std::sync::mpsc::Sender<Vec<f32>>
                     let floats: Vec<f32> = data.iter()
                         .map(|&s| (s as f32 / u16::MAX as f32) * 2.0 - 1.0)
                         .collect();
-                    buf.lock().unwrap().extend(floats);
+                    if let Ok(mut b) = buf.lock() {
+                        b.extend(floats);
+                    }
                 },
                 err_fn,
                 None,
@@ -71,7 +79,9 @@ pub fn record(stop: Arc<AtomicBool>, chunk_tx: std::sync::mpsc::Sender<Vec<f32>>
                 &config.into(),
                 move |data: &[i32], _| {
                     let floats: Vec<f32> = data.iter().map(|&s| s as f32 / i32::MAX as f32).collect();
-                    buf.lock().unwrap().extend(floats);
+                    if let Ok(mut b) = buf.lock() {
+                        b.extend(floats);
+                    }
                 },
                 err_fn,
                 None,
@@ -114,6 +124,11 @@ pub fn record(stop: Arc<AtomicBool>, chunk_tx: std::sync::mpsc::Sender<Vec<f32>>
         if frame.len() == 480 {
             let is_speech = is_speech_frame(frame);
             chunker.push_frame(frame, is_speech);
+        } else if !frame.is_empty() {
+            let mut padded = frame.to_vec();
+            padded.resize(480, 0.0);
+            let is_speech = is_speech_frame(&padded);
+            chunker.push_frame(&padded, is_speech);
         }
     }
     chunker.flush(); // emit any in-progress speech on hotkey release

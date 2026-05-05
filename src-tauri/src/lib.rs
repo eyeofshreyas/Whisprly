@@ -113,9 +113,17 @@ async fn coordinator(
 
                     // Extract chunk_rx before moving handle.thread into spawn_blocking
                     let chunk_rx = handle.chunk_rx;
-                    tokio::task::spawn_blocking(move || handle.thread.join().unwrap())
-                        .await
-                        .unwrap();
+                    let join_result = tokio::task::spawn_blocking(move || handle.thread.join())
+                        .await;
+                    match join_result {
+                        Ok(Ok(())) => {}
+                        Ok(Err(_)) | Err(_) => {
+                            eprintln!("audio thread panicked");
+                            emit_status(&app, "idle", Some("Recording error".into()));
+                            hide_overlay(&app);
+                            continue;
+                        }
+                    }
 
                     // Drain all chunks from the channel
                     let chunks: Vec<Vec<f32>> = chunk_rx.try_iter().collect();
@@ -128,6 +136,7 @@ async fn coordinator(
 
                     let s = settings.lock().unwrap().clone();
                     let language = transcribe::language_param(&s.language);
+                    let mut used_engine = "local".to_string();
                     let mut session_texts: Vec<String> = Vec::new();
 
                     for chunk in chunks {
@@ -141,7 +150,10 @@ async fn coordinator(
                         };
 
                         let text = match text {
-                            Some(t) if !t.is_empty() => Some(t),
+                            Some(t) if !t.is_empty() => {
+                                used_engine = "groq".to_string();
+                                Some(t)
+                            }
                             _ => transcribe::local(&wav, &s.python_cmd, &s.sidecar_path, language.clone()).await.ok(),
                         };
 
@@ -171,15 +183,15 @@ async fn coordinator(
                     .unwrap_or_else(|_| raw_text.clone());
 
                     let p = polished.clone();
-                    tokio::task::spawn_blocking(move || auto_type::type_text(&p))
-                        .await
-                        .ok();
+                    if let Err(e) = tokio::task::spawn_blocking(move || auto_type::type_text(&p)).await {
+                        eprintln!("auto_type failed: {e:?}");
+                    }
 
                     let db_entry = db::TranscriptEntry {
                         id: 0,
                         text: polished,
                         raw_text: Some(raw_text),
-                        engine: if s.groq_api_key.is_empty() { "local" } else { "groq" }.to_string(),
+                        engine: used_engine.clone(),
                         mode: s.output_mode.clone(),
                         language: language.clone(),
                         timestamp: chrono::Utc::now().to_rfc3339(),
