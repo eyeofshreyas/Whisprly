@@ -143,6 +143,7 @@ async fn coordinator(
                         if audio::is_silent(&chunk) { continue; }
                         let wav = audio::to_wav_from_samples(chunk);
 
+                        let mut chunk_engine = "local";
                         let text = if !s.groq_api_key.is_empty() {
                             transcribe::groq(&wav, &s.groq_api_key, language.clone()).await.ok()
                         } else {
@@ -151,7 +152,7 @@ async fn coordinator(
 
                         let text = match text {
                             Some(t) if !t.is_empty() => {
-                                used_engine = "groq".to_string();
+                                chunk_engine = "groq";
                                 Some(t)
                             }
                             _ => transcribe::local(&wav, &s.python_cmd, &s.sidecar_path, language.clone()).await.ok(),
@@ -159,6 +160,7 @@ async fn coordinator(
 
                         if let Some(t) = text {
                             if !t.is_empty() {
+                                used_engine = chunk_engine.to_string();
                                 session_texts.push(t);
                             }
                         }
