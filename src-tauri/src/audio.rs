@@ -186,6 +186,56 @@ pub fn to_wav(result: RecordingResult) -> Vec<u8> {
     buf
 }
 
+// 17 × 30ms ≈ 510ms silence before flushing a chunk
+const SILENCE_THRESHOLD_FRAMES: usize = 17;
+// 10 × 30ms = 300ms minimum — discard sub-word fragments
+const MIN_CHUNK_FRAMES: usize = 10;
+
+pub struct Chunker {
+    sender: std::sync::mpsc::Sender<Vec<f32>>,
+    buffer: Vec<f32>,
+    silence_count: usize,
+    has_speech: bool,
+}
+
+impl Chunker {
+    pub fn new(sender: std::sync::mpsc::Sender<Vec<f32>>) -> Self {
+        Chunker { sender, buffer: Vec::new(), silence_count: 0, has_speech: false }
+    }
+
+    /// Push a 30ms frame. `is_speech` is the VAD decision for this frame.
+    pub fn push_frame(&mut self, frame: &[f32], is_speech: bool) {
+        if is_speech {
+            self.has_speech = true;
+            self.silence_count = 0;
+            self.buffer.extend_from_slice(frame);
+        } else if self.has_speech {
+            self.silence_count += 1;
+            self.buffer.extend_from_slice(frame);
+            if self.silence_count >= SILENCE_THRESHOLD_FRAMES {
+                self.emit();
+            }
+        }
+    }
+
+    /// Call on hotkey release to flush any in-progress speech segment.
+    pub fn flush(&mut self) {
+        if self.has_speech {
+            self.emit();
+        }
+    }
+
+    fn emit(&mut self) {
+        let frame_count = self.buffer.len() / 480;
+        if frame_count >= MIN_CHUNK_FRAMES {
+            self.sender.send(self.buffer.clone()).ok();
+        }
+        self.buffer.clear();
+        self.silence_count = 0;
+        self.has_speech = false;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -202,5 +252,41 @@ mod tests {
         // 480 samples at 0.5 amplitude — well above speech threshold
         let tone = vec![0.5f32; 480];
         assert!(is_speech_frame(&tone), "loud tone must be speech");
+    }
+
+    #[test]
+    fn chunker_emits_after_silence_threshold() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut chunker = Chunker::new(tx);
+
+        // 20 speech frames (600ms) then 20 silence frames (600ms > 510ms threshold)
+        for _ in 0..20 { chunker.push_frame(&[0.5f32; 480], true); }
+        for _ in 0..20 { chunker.push_frame(&[0.0f32; 480], false); }
+
+        let chunk = rx.try_recv().expect("chunk must be emitted after silence threshold");
+        assert!(!chunk.is_empty(), "emitted chunk must have samples");
+    }
+
+    #[test]
+    fn chunker_flush_emits_buffered_speech() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut chunker = Chunker::new(tx);
+
+        for _ in 0..15 { chunker.push_frame(&[0.5f32; 480], true); }
+        chunker.flush();
+
+        rx.try_recv().expect("flush must emit buffered speech");
+    }
+
+    #[test]
+    fn chunker_discards_short_chunks() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut chunker = Chunker::new(tx);
+
+        // Only 5 frames = 150ms — below MIN_CHUNK_FRAMES (10 × 30ms = 300ms)
+        for _ in 0..5 { chunker.push_frame(&[0.5f32; 480], true); }
+        chunker.flush();
+
+        assert!(rx.try_recv().is_err(), "chunk under 300ms must be discarded");
     }
 }
