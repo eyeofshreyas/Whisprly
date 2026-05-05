@@ -15,6 +15,21 @@ import {
 } from "./firestore";
 import LoginScreen from "./LoginScreen";
 
+const LANGUAGES = [
+  { code: "auto", label: "Auto-detect" },
+  { code: "en",   label: "English" },
+  { code: "es",   label: "Spanish" },
+  { code: "fr",   label: "French" },
+  { code: "de",   label: "German" },
+  { code: "it",   label: "Italian" },
+  { code: "pt",   label: "Portuguese" },
+  { code: "ru",   label: "Russian" },
+  { code: "ja",   label: "Japanese" },
+  { code: "zh",   label: "Chinese" },
+  { code: "hi",   label: "Hindi" },
+  { code: "ar",   label: "Arabic" },
+];
+
 type Status = "idle" | "recording" | "transcribing";
 
 interface TranscriptEntry {
@@ -288,6 +303,8 @@ export default function App() {
   const [lightMode, setLightMode]   = useState(true);
   const [user, setUser]           = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<TranscriptEntry[] | null>(null);
 
   useEffect(() => {
     const unStatus = listen<StatusPayload>("status", (e) => {
@@ -398,9 +415,24 @@ export default function App() {
     await deleteAllTranscripts(user.uid).catch(console.error);
   }, [user]);
 
+  const handleSearch = useCallback(async (q: string) => {
+    setSearchQuery(q);
+    if (q.trim() === "") {
+      setSearchResults(null);
+      return;
+    }
+    try {
+      const results = await invoke<TranscriptEntry[]>("search_transcripts", { query: q });
+      setSearchResults(results);
+    } catch {
+      setSearchResults([]);
+    }
+  }, []);
+
   const words  = totalWords(transcripts);
   const days   = activeDays(transcripts);
-  const groups = groupByDate(transcripts);
+  const displayList = searchResults ?? transcripts;
+  const groups = groupByDate(displayList);
 
   if (!authReady) {
     return (
@@ -493,6 +525,20 @@ export default function App() {
                     placeholder="gsk_..."
                   />
                   <span className="field-hint">Fast cloud transcription via Groq Whisper</span>
+                </div>
+                <div className="field-group">
+                  <label className="field-label" htmlFor="lang-select">Transcription Language</label>
+                  <select
+                    id="lang-select"
+                    className="field-select"
+                    value={settings.language ?? "auto"}
+                    onChange={(e) => setSettings(s => ({ ...s, language: e.target.value }))}
+                  >
+                    {LANGUAGES.map((l) => (
+                      <option key={l.code} value={l.code}>{l.label}</option>
+                    ))}
+                  </select>
+                  <span className="field-hint">Override Whisper language detection</span>
                 </div>
               </div>
               <div className="settings-section">
@@ -687,12 +733,19 @@ export default function App() {
 
             {/* Transcript feed */}
             <div className="feed">
-              {transcripts.length > 0 && (
+              <input
+                className="search-input"
+                type="search"
+                placeholder="Search transcripts…"
+                value={searchQuery}
+                onChange={(e) => handleSearch(e.target.value)}
+              />
+              {displayList.length > 0 && (
                 <div className="feed-header">
                   <button className="clear-all-btn" onClick={clearAll}>Clear all</button>
                 </div>
               )}
-              {transcripts.length === 0 ? (
+              {displayList.length === 0 ? (
                 <div className="empty">
                   <div className="empty-icon">
                     <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">

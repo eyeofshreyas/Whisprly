@@ -1190,3 +1190,48 @@ button.sidebar-user:hover { background: var(--bg-card-hover); }
   color: var(--red);
 }
 ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.20); }
+
+/* ── Search input ─────────────────────────────────────────────────────────── */
+.search-input {
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-0);
+  font-size: 13px;
+  font-family: var(--font-body);
+  margin-bottom: 8px;
+  box-sizing: border-box;
+  outline: none;
+  transition: border-color var(--transition);
+  flex-shrink: 0;
+}
+
+.search-input:focus {
+  border-color: var(--accent);
+}
+
+/* ── Settings select ──────────────────────────────────────────────────────── */
+.field-select {
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-0);
+  padding: 9px 13px;
+  font-size: 13.5px;
+  font-family: var(--font-body);
+  cursor: pointer;
+  outline: none;
+  transition: border-color var(--transition);
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='rgba(244,241,236,0.4)' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 32px;
+}
+
+.field-select:focus {
+  border-color: var(--accent);
+}
