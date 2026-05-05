@@ -17,6 +17,7 @@ import { db } from "./firebase";
 export interface FSSettings {
   groqApiKey: string;
   pythonCmd:  string;
+  language?:  string;
 }
 
 export interface FSTranscriptEntry {
@@ -60,6 +61,7 @@ export async function loadSettings(uid: string): Promise<FSSettings | null> {
   return {
     groqApiKey: d.groqApiKey ?? "",
     pythonCmd:  d.pythonCmd  ?? "python",
+    language:   d.language   ?? "auto",
   };
 }
 

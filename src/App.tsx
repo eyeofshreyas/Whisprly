@@ -34,6 +34,7 @@ interface StatusPayload {
 interface Settings {
   groqApiKey: string;
   pythonCmd: string;
+  language: string;
 }
 
 const BAR_COUNT = 36;
@@ -279,7 +280,7 @@ export default function App() {
   const [status, setStatus]         = useState<Status>("idle");
   const [statusMsg, setStatusMsg]   = useState("");
   const [transcripts, setTranscripts] = useState<TranscriptEntry[]>([]);
-  const [settings, setSettings]     = useState<Settings>({ groqApiKey: "", pythonCmd: "python" });
+  const [settings, setSettings]     = useState<Settings>({ groqApiKey: "", pythonCmd: "python", language: "auto" });
   const [saved, setSaved]           = useState(false);
   const [outputMode, setOutputMode] = useState<"prose" | "email" | "code">("prose");
   const [activeNav, setActiveNav]   = useState("home");
@@ -310,6 +311,7 @@ export default function App() {
               await invoke("save_settings", {
                 groqApiKey: fsSettings.groqApiKey,
                 pythonCmd:  fsSettings.pythonCmd,
+                language:   fsSettings.language,
               }).catch(() => {});
             } else {
               const rustSettings = await invoke<Settings>("get_settings").catch(() => null);
@@ -319,7 +321,7 @@ export default function App() {
             setTranscripts(fsTranscripts);
           } else {
             setTranscripts([]);
-            setSettings({ groqApiKey: "", pythonCmd: "python" });
+            setSettings({ groqApiKey: "", pythonCmd: "python", language: "auto" });
           }
         } catch (err) {
           console.error("Auth change handler failed:", err);
@@ -365,11 +367,12 @@ export default function App() {
   }, []);
 
   const saveSettings = useCallback(async () => {
-    await invoke("save_settings", { groqApiKey: settings.groqApiKey, pythonCmd: settings.pythonCmd });
+    await invoke("save_settings", { groqApiKey: settings.groqApiKey, pythonCmd: settings.pythonCmd, language: settings.language });
     if (user) {
       await saveSettings_fs(user.uid, {
         groqApiKey: settings.groqApiKey,
         pythonCmd:  settings.pythonCmd,
+        language:   settings.language,
       }).catch(console.error);
     }
     setSaved(true);

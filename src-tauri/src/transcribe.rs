@@ -27,7 +27,8 @@ fn is_hallucination(text: &str) -> bool {
 }
 
 pub fn language_param(language: &str) -> Option<String> {
-    if language == "auto" { None } else { Some(language.to_string()) }
+    let t = language.trim();
+    if t.is_empty() || t == "auto" { None } else { Some(t.to_string()) }
 }
 
 pub async fn groq(wav_bytes: &[u8], api_key: &str, language: Option<String>) -> Result<String, String> {
@@ -125,5 +126,11 @@ mod tests {
     fn specific_language_yields_some() {
         assert_eq!(language_param("en"), Some("en".to_string()));
         assert_eq!(language_param("ja"), Some("ja".to_string()));
+    }
+
+    #[test]
+    fn empty_language_yields_none() {
+        assert_eq!(language_param(""), None);
+        assert_eq!(language_param("  "), None);
     }
 }
