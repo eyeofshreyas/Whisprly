@@ -291,7 +291,7 @@ export default function App() {
   const [outputMode, setOutputMode] = useState<"prose" | "email" | "code">("prose");
   const [activeNav, setActiveNav]   = useState("home");
   const [copiedKey, setCopiedKey]   = useState<string | null>(null);
-  const [lightMode, setLightMode]   = useState(true);
+  const [lightMode, setLightMode]   = useState(false);
   const [user, setUser]           = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");

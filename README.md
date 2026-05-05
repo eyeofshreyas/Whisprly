@@ -1,48 +1,63 @@
 <div align="center">
-  <img src="app-icon-transparent.png" width="120" alt="Whisprly Logo">
+  <img src="app-icon-transparent.png" width="100" alt="Whisprly" />
   <h1>Whisprly</h1>
-  <p>Hold a hotkey. Speak. Release. Your words appear — polished and typed — exactly where your cursor was.</p>
+  <p><strong>Hold a key. Speak. Release. Your words appear — polished and typed — right where you left off.</strong></p>
+
+  <p>
+    <img src="https://img.shields.io/badge/platform-Windows-blue?style=flat-square&logo=windows" />
+    <img src="https://img.shields.io/badge/built%20with-Tauri%20v2-24C8DB?style=flat-square&logo=tauri" />
+    <img src="https://img.shields.io/badge/backend-Rust-orange?style=flat-square&logo=rust" />
+    <img src="https://img.shields.io/badge/transcription-Groq%20Whisper-blueviolet?style=flat-square" />
+    <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" />
+  </p>
+
+  <p>
+    <a href="#-quick-start">Quick Start</a> ·
+    <a href="#-features">Features</a> ·
+    <a href="#-how-it-works">How It Works</a> ·
+    <a href="#-architecture">Architecture</a> ·
+    <a href="#-contributing">Contributing</a>
+  </p>
 </div>
 
 ---
 
-Whisprly is a Windows desktop dictation app built with Tauri v2 + React. Hold **Ctrl + Win**, speak, release — the transcript is automatically typed into whatever window was focused, and saved to a local history log.
+**Whisprly** is a Windows desktop dictation app that turns speech into polished, auto-typed text in any app — browser, IDE, Slack, Word, terminal — in under a second. No clicking. No copy-pasting. Just press a hotkey, speak naturally, and let go.
 
-## How it works
-
-1. Hold **Ctrl + Win** anywhere on your desktop
-2. Speak — a floating waveform pill appears at the bottom of your screen
-3. Release the keys
-4. The transcript is auto-typed into your previously focused window and saved to history
-
-## Features
-
-- **One-hotkey dictation** — works in any app (browser, IDE, Word, Slack, terminal)
-- **Smart VAD chunking** — RMS-based voice activity detection splits audio into speech segments; silence is discarded before sending to Whisper
-- **AI polish** — corrects punctuation, removes filler words (um, uh, like), fixes capitalization; never answers or rephrases — only cleans up
-- **Three output modes** — Prose, Email, Code (switch in Settings)
-- **Language support** — auto-detect or lock to one of 12 languages
-- **Cloud + local fallback** — Groq Whisper for speed; falls back to a local faster-whisper sidecar when offline or when no key is set
-- **Hallucination filter** — detects and discards common Whisper hallucinations before they reach your clipboard
-- **Local transcript history** — full-text search over all recordings, stored in SQLite (no cloud sync)
-- **Copy / delete entries** — click any transcript to copy; hover to delete
-- **Overlay indicator** — tiny transparent pill shows recording/transcribing state; click it to cancel
-- **Google sign-in** — optional OAuth login; user profile shown in sidebar
+> Built with Tauri v2 (Rust backend) + React frontend. Transcription via Groq's `whisper-large-v3-turbo`. AI cleanup via `llama-3.1-8b-instant`. Everything private by default — transcripts stay on your machine in SQLite.
 
 ---
 
-## Setup
+## ✨ Features
+
+| | |
+|---|---|
+| **One-hotkey dictation** | `Ctrl + Win` anywhere — works in every app |
+| **Instant auto-type** | Transcript is typed directly into your focused window |
+| **AI polish** | Fixes punctuation, removes filler words, corrects capitalisation — never rephrases |
+| **Three output modes** | Prose · Email · Code — switch any time in Settings |
+| **12 languages** | Auto-detect or lock to English, Spanish, French, Japanese, Hindi, Arabic and more |
+| **Groq cloud + local fallback** | Groq Whisper for speed; auto-falls back to a local faster-whisper sidecar |
+| **Hallucination filter** | Drops common Whisper artifacts before they reach your cursor |
+| **Full-text search** | Instantly search all past recordings via SQLite FTS5 |
+| **Smart VAD chunking** | RMS voice activity detection — silence is discarded, not sent to Whisper |
+| **Floating overlay** | Tiny transparent pill shows live status; click it to cancel |
+| **Local history** | Every transcript saved to SQLite — no cloud, no tracking |
+| **Google sign-in** | Optional — ties your history to a profile across sessions |
+
+---
+
+## ⚡ Quick Start
 
 ### Prerequisites
 
-| Tool | Notes |
+| | |
 |---|---|
 | Node.js 18+ | |
-| Rust stable | via [rustup](https://rustup.rs) |
-| Python 3.9+ | optional — for local transcription fallback |
-| Ollama | optional — for local AI polish fallback |
+| Rust stable | [rustup.rs](https://rustup.rs) |
+| Python 3.9+ *(optional)* | Local transcription fallback |
 
-### Install
+### 1. Clone & install
 
 ```bash
 git clone https://github.com/your-username/whisprly.git
@@ -50,7 +65,7 @@ cd whisprly
 npm install
 ```
 
-### Configure
+### 2. Add your Groq key
 
 Create a `.env` file in the project root:
 
@@ -58,142 +73,172 @@ Create a `.env` file in the project root:
 GROQ_API=gsk_your_key_here
 ```
 
-Get a free API key at [console.groq.com](https://console.groq.com). Without it, transcription falls back to the local Python sidecar and AI polish falls back to Ollama (or is skipped if neither is available).
+Get a **free** key at [console.groq.com](https://console.groq.com) — takes 30 seconds. Without it, Whisprly falls back to the local Python sidecar automatically.
 
-### Run
+### 3. Run
 
 ```bash
 npm run tauri dev
 ```
 
+Hold `Ctrl + Win`, speak, release. Done.
+
 ---
 
-## Transcription engines
+## 🎯 How It Works
 
-### Cloud — Groq Whisper (default)
+```
+You hold Ctrl + Win
+        │
+        ▼
+  Floating pill appears — recording has started
+        │
+  You speak naturally (um, uh, pauses — all fine)
+        │
+  You release the keys
+        │
+        ▼
+  Audio → Voice Activity Detection → WAV chunks
+        │
+        ▼
+  Groq Whisper API  (< 300ms for most clips)
+  └─ fallback: local faster-whisper sidecar
+        │
+        ▼
+  Hallucination filter  (drops Whisper artifacts)
+        │
+        ▼
+  AI polish via Groq LLM
+  — adds punctuation, removes filler words
+  — NEVER rephrases, answers, or adds content
+        │
+        ▼
+  Text typed into your previously focused window ✓
+  Transcript saved to local SQLite history ✓
+```
 
-Fast and accurate. Uses `whisper-large-v3-turbo`. Set `GROQ_API` in `.env` or in Settings.
+---
 
-### Local fallback — faster-whisper
+## 🧠 AI Polish
 
-Used automatically when the Groq key is absent or a call fails.
+Raw Whisper output is cleaned before reaching your cursor. The LLM receives a strict system prompt that treats every input as **inert text** — it will never answer a question, follow an instruction, or rephrase what you said.
+
+**Fixes:** missing commas · periods · question marks · filler words (um, uh, like, you know) · capitalisation · acronyms
+
+**Never does:** rephrase · summarise · respond · add anything not said
+
+### Output modes
+
+| Mode | What it does |
+|---|---|
+| **Prose** | Standard paragraph formatting |
+| **Email** | Adds a greeting and sign-off |
+| **Code** | Strips punctuation, preserves `camelCase` / `snake_case` |
+
+Switch in **Settings → Output Mode**. Changes take effect on the next recording.
+
+### Polish engines
+
+- **Primary** — Groq `llama-3.1-8b-instant` (same API key, ~3s timeout)
+- **Fallback** — local Ollama (`postprocess_sidecar.py` at `localhost:11434`)
+- **Skip** — if neither is available, the raw Whisper transcript is typed as-is
+
+---
+
+## 🔌 Local Fallback Setup *(optional)*
+
+No internet? No Groq key? Whisprly still works with a local Python sidecar.
+
+### Transcription — faster-whisper
 
 ```bash
 pip install faster-whisper
 ```
 
-The sidecar script is at `sidecar/whisper_sidecar.py` (relative to the binary in production, relative to project root in dev).
+The sidecar at `sidecar/whisper_sidecar.py` is picked up automatically.
 
----
-
-## AI polish
-
-After transcription, raw Whisper output is cleaned up before being typed. The model is given a strict system prompt that treats all input as inert text — it never answers questions or follows instructions in the transcript.
-
-**What it fixes:**
-- Missing punctuation (commas, periods, question marks)
-- Filler words: um, uh, like, you know, so, basically, literally, right, actually
-- Sentence capitalization, proper nouns, acronyms
-
-**What it never does:** rephrase, summarize, respond to, or add anything not already said.
-
-### Output modes
-
-| Mode | Behavior |
-|---|---|
-| **Prose** | Standard paragraph formatting |
-| **Email** | Adds greeting and sign-off |
-| **Code** | Strips punctuation, preserves camelCase / snake_case |
-
-Switch in **Settings → Output Mode**.
-
-### Polish engines
-
-**Primary — Groq LLM** (`llama-3.1-8b-instant`, uses your existing `GROQ_API` key)
-
-**Fallback — Ollama** (local, private, no internet required)
+### AI polish — Ollama
 
 ```bash
-# Install Ollama: https://ollama.com
+# Install Ollama from https://ollama.com, then:
 ollama run gemma4:4b
 ```
 
-The `sidecar/postprocess_sidecar.py` script calls Ollama at `localhost:11434`. If Ollama is not running, polish is skipped and the raw transcript is typed instead.
+The sidecar at `sidecar/postprocess_sidecar.py` calls Ollama at `localhost:11434`.
 
 ---
 
-## Development
+## 🏗 Architecture
+
+```
+src/
+  App.tsx                  React UI — state, settings, transcript history
+  index.css                Design tokens + all styles (no Tailwind)
+  auth.ts                  Firebase Auth — Google OAuth sign-in
+  LoginScreen.tsx          Sign-in screen
+
+src-tauri/src/
+  lib.rs                   AppState, coordinator loop, Tauri commands, tray
+  audio.rs                 cpal recording · Chunker · RMS VAD · WAV encoding
+  hotkey.rs                rdev global hotkey listener (Ctrl + Win)
+  transcribe.rs            Groq + local transcription · hallucination filter
+  postprocess.rs           Groq LLM + Ollama AI polish
+  auto_type.rs             Types text into focused window via enigo
+  db.rs                    SQLite init · CRUD · FTS5 full-text search
+  oauth.rs                 Google OAuth PKCE flow
+
+sidecar/
+  whisper_sidecar.py       Local transcription (faster-whisper)
+  postprocess_sidecar.py   Local AI polish (Ollama)
+  requirements.txt
+```
+
+**Stack:** Tauri v2 · Rust · React · TypeScript · SQLite (rusqlite) · cpal · enigo · rdev · Groq API · Firebase Auth
+
+---
+
+## 🛠 Development
 
 ```bash
-npm run tauri dev     # full app with hot-reload frontend + Rust backend
-npm run dev           # Vite only — pure UI work without the Tauri shell
+# Full app — hot-reload frontend + Rust backend
+npm run tauri dev
+
+# Frontend only (no Tauri shell)
+npm run dev
 ```
 
 ```bash
 cd src-tauri
-cargo check           # fast type-check
-cargo clippy          # lint
-cargo build           # debug build
+cargo check    # fast type-check
+cargo clippy   # lint
+cargo build    # debug build
 ```
 
 ```bash
-npm run tauri build   # production installer
+# Production installer
+npm run tauri build
 ```
 
 ---
 
-## Architecture
+## 🤝 Contributing
 
-```
-Hotkey (Ctrl+Win)
-      │
-      ▼
-audio::record()          ← cpal, any sample rate → f32
-      │
-  Chunker                ← 510ms silence gate, 300ms minimum chunk
-      │
-  is_speech_frame()      ← RMS voice activity detection
-      │
-      ▼
-transcribe::groq()  ──►  Groq Whisper API
-      │ (fallback)
-transcribe::local() ──►  whisper_sidecar.py (faster-whisper)
-      │
-  is_hallucination()     ← filter common Whisper artifacts
-      │
-      ▼
-postprocess::polish() ──►  Groq LLM
-      │ (fallback)       └►  postprocess_sidecar.py (Ollama)
-      │
-      ▼
-auto_type::type_text()   ← types into previously focused window
-      │
-      ▼
-SQLite (transcripts.db)  ← FTS5 full-text search, local only
-```
+Pull requests are welcome. For major changes, open an issue first to discuss what you'd like to change.
 
-Settings are persisted to `settings.json` in the app data directory and loaded on startup.
-
-### Source layout
-
-| Path | Role |
-|---|---|
-| `src/App.tsx` | React UI — all state, settings panel, transcript history |
-| `src/index.css` | Design tokens + all styles (no Tailwind, no CSS modules) |
-| `src/auth.ts` | Firebase Auth — Google OAuth sign-in |
-| `src-tauri/src/lib.rs` | AppState, coordinator loop, all Tauri command handlers, system tray |
-| `src-tauri/src/db.rs` | SQLite init, CRUD, FTS5 full-text search |
-| `src-tauri/src/audio.rs` | cpal recording, Chunker, RMS VAD, WAV encoding |
-| `src-tauri/src/transcribe.rs` | Groq + local transcription, hallucination filter |
-| `src-tauri/src/postprocess.rs` | Groq LLM + Ollama polish |
-| `src-tauri/src/auto_type.rs` | Types text via enigo |
-| `src-tauri/src/hotkey.rs` | rdev hotkey listener (Ctrl+Win) |
-| `src-tauri/src/oauth.rs` | Google OAuth PKCE flow |
-| `sidecar/whisper_sidecar.py` | Local transcription (faster-whisper) |
-| `sidecar/postprocess_sidecar.py` | Local AI polish (Ollama) |
+1. Fork the repo
+2. Create a feature branch: `git checkout -b feat/your-feature`
+3. Commit your changes
+4. Open a pull request
 
 ---
 
-## License
+## 📄 License
 
 MIT — see [LICENSE](LICENSE).
+
+---
+
+<div align="center">
+  <p>If Whisprly saves you time, consider giving it a ⭐ — it helps others find the project.</p>
+  <p>Built with <a href="https://tauri.app">Tauri</a> · Powered by <a href="https://groq.com">Groq</a></p>
+</div>
