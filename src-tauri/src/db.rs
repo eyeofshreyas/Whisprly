@@ -49,7 +49,8 @@ pub fn init_db(conn: &Connection) -> Result<()> {
             INSERT INTO transcripts_fts(rowid, text, raw_text)
             VALUES (new.id, new.text, new.raw_text);
         END;
-    ")
+    ")?;
+    init_settings(conn)
 }
 
 pub fn insert_transcript(conn: &Connection, entry: &TranscriptEntry) -> Result<i64> {
@@ -120,6 +121,31 @@ pub fn clear_all_transcripts(conn: &Connection) -> Result<()> {
 pub fn delete_transcript(conn: &Connection, id: i64) -> Result<()> {
     conn.execute("DELETE FROM transcripts WHERE id = ?1", params![id])?;
     conn.execute("DELETE FROM transcripts_fts WHERE rowid = ?1", params![id])?;
+    Ok(())
+}
+
+pub fn init_settings(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS settings (
+            key   TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );"
+    )
+}
+
+pub fn get_setting(conn: &Connection, key: &str) -> Option<String> {
+    conn.query_row(
+        "SELECT value FROM settings WHERE key = ?1",
+        params![key],
+        |row| row.get(0),
+    ).ok()
+}
+
+pub fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<()> {
+    conn.execute(
+        "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
+        params![key, value],
+    )?;
     Ok(())
 }
 
@@ -200,5 +226,26 @@ mod tests {
         let results = get_transcripts(&conn, 10).unwrap();
         assert_eq!(results[0].text, "third", "most recent entry must be first");
         assert_eq!(results[2].text, "first", "oldest entry must be last");
+    }
+
+    #[test]
+    fn set_and_get_setting() {
+        let conn = mem_conn();
+        set_setting(&conn, "setup_complete", "true").unwrap();
+        assert_eq!(get_setting(&conn, "setup_complete").as_deref(), Some("true"));
+    }
+
+    #[test]
+    fn get_missing_setting_returns_none() {
+        let conn = mem_conn();
+        assert_eq!(get_setting(&conn, "nonexistent"), None);
+    }
+
+    #[test]
+    fn set_setting_overwrites_existing() {
+        let conn = mem_conn();
+        set_setting(&conn, "key", "v1").unwrap();
+        set_setting(&conn, "key", "v2").unwrap();
+        assert_eq!(get_setting(&conn, "key").as_deref(), Some("v2"));
     }
 }
