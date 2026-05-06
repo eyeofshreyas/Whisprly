@@ -1,0 +1,42 @@
+<h2>How should the background setup work?</h2>
+<p class="subtitle">Three implementation approaches — pick the one that feels right</p>
+
+<div class="options">
+
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Rust-native (recommended)</h3>
+      <p>On startup, Rust checks if Ollama is installed and <code>gemma4-4b</code> is pulled. If not, it runs <code>winget install Ollama.Ollama</code> then <code>ollama pull gemma4-4b</code> — streaming progress back to the frontend via Tauri events. Frontend shows the bottom bar from that stream.</p>
+      <div class="pros-cons" style="margin-top:10px;">
+        <div class="pros"><h4>Pros</h4><ul><li>No extra dependencies</li><li>Fits existing Tauri event pattern</li><li>Full control over progress</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Requires winget (built into Windows 11)</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Download Ollama installer directly</h3>
+      <p>Instead of winget, Rust downloads the Ollama <code>.exe</code> installer directly from ollama.com, runs it silently, then pulls the model. More reliable if friends don't have winget updated.</p>
+      <div class="pros-cons" style="margin-top:10px;">
+        <div class="pros"><h4>Pros</h4><ul><li>Works even if winget is outdated</li><li>No dependency on winget</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Must hardcode a download URL</li><li>More complex install flow</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Setup Python script</h3>
+      <p>A Python script handles everything — checks Ollama, installs it, pulls the model. Rust just runs the script and forwards its output as progress events.</p>
+      <div class="pros-cons" style="margin-top:10px;">
+        <div class="pros"><h4>Pros</h4><ul><li>Easy to modify without recompiling</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Requires Python — which friends may not have</li><li>Defeats the purpose of a self-contained installer</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+</div>
