@@ -16,6 +16,7 @@ mod hotkey;
 mod oauth;
 mod transcribe;
 mod postprocess;
+mod setup;
 
 pub enum HotkeyEvent {
     Start,
@@ -367,7 +368,10 @@ pub fn run() {
             });
 
             std::thread::spawn(move || hotkey::start_listener(tx));
-            tauri::async_runtime::spawn(coordinator(rx, app_handle.clone(), settings, db));
+            tauri::async_runtime::spawn(coordinator(rx, app_handle.clone(), settings, db.clone()));
+            let db_for_setup = db.clone();
+            let app_for_setup = app_handle.clone();
+            tauri::async_runtime::spawn(setup::check_and_setup(app_for_setup, db_for_setup));
 
             // ── System tray ──
             let open_i = MenuItem::with_id(app, "open", "Open Whisprly", true, None::<&str>)?;
