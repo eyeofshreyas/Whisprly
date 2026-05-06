@@ -271,6 +271,12 @@ function activeDays(entries: TranscriptEntry[]) {
 
 // ── Nav data ──────────────────────────────────────────────────────────────────
 
+type SetupProgress = {
+  stage: "checking" | "installing_winget" | "installing_ollama" | "pulling_model" | "done" | "error";
+  percent: number;
+  message: string;
+};
+
 type NavItem = { id: string; Icon: React.ComponentType; label: string };
 const NAV_ITEMS: NavItem[] = [
   { id: "home",       Icon: IcHome,     label: "Home"       },
@@ -297,9 +303,9 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<TranscriptEntry[] | null>(null);
 
-  type SetupProgress = { stage: string; percent: number; message: string };
   const [setupProgress, setSetupProgress] = useState<SetupProgress | null>(null);
   const [showToast, setShowToast] = useState(false);
+  const [toastMessage, setToastMessage] = useState("");
 
   useEffect(() => {
     const unStatus = listen<StatusPayload>("status", (e) => {
@@ -310,9 +316,11 @@ export default function App() {
     const unSetup = listen<SetupProgress>("setup_progress", (e) => {
       const p = e.payload;
       if (p.stage === "done") {
+        setToastMessage(p.message);
         setSetupProgress(null);
         setShowToast(true);
-        setTimeout(() => setShowToast(false), 4000);
+        if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+        toastTimerRef.current = setTimeout(() => setShowToast(false), 4000);
       } else {
         setSetupProgress(p);
       }
@@ -345,6 +353,7 @@ export default function App() {
       unStatus.then((f) => f());
       unSetup.then((f) => f());
       unAuth();
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     };
   }, []);
 
@@ -397,6 +406,7 @@ export default function App() {
 
   const searchGenRef = useRef(0);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleSearch = useCallback((q: string) => {
     setSearchQuery(q);
@@ -824,7 +834,7 @@ export default function App() {
             </div>
           )}
           {setupProgress.stage !== "error" && (
-            <span style={{ color: "var(--text-3)", flexShrink: 0 }}>
+            <span className="setup-bar__percent">
               {setupProgress.percent}%
             </span>
           )}
@@ -832,7 +842,7 @@ export default function App() {
       )}
 
       {showToast && (
-        <div className="setup-toast">✓ Gemma 4 ready. Local AI postprocessing enabled.</div>
+        <div className="setup-toast">✓ {toastMessage}</div>
       )}
     </div>
   );

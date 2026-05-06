@@ -1288,6 +1288,11 @@ button.sidebar-user:hover { background: var(--bg-card-hover); }
   transition: width 0.4s ease-out;
 }
 
+.setup-bar__percent {
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+
 /* ── Setup toast ────────────────────────────────────────────────────────────── */
 .setup-toast {
   position: fixed;
