@@ -297,10 +297,25 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<TranscriptEntry[] | null>(null);
 
+  type SetupProgress = { stage: string; percent: number; message: string };
+  const [setupProgress, setSetupProgress] = useState<SetupProgress | null>(null);
+  const [showToast, setShowToast] = useState(false);
+
   useEffect(() => {
     const unStatus = listen<StatusPayload>("status", (e) => {
       setStatus(e.payload.status);
       setStatusMsg(e.payload.message ?? "");
+    });
+
+    const unSetup = listen<SetupProgress>("setup_progress", (e) => {
+      const p = e.payload;
+      if (p.stage === "done") {
+        setSetupProgress(null);
+        setShowToast(true);
+        setTimeout(() => setShowToast(false), 4000);
+      } else {
+        setSetupProgress(p);
+      }
     });
 
     const unAuth = onAuthChange((u) => {
@@ -328,6 +343,7 @@ export default function App() {
 
     return () => {
       unStatus.then((f) => f());
+      unSetup.then((f) => f());
       unAuth();
     };
   }, []);
@@ -426,7 +442,7 @@ export default function App() {
   }
 
   return (
-    <div className={`app${lightMode ? " light-mode" : ""}`}>
+    <div className={`app${lightMode ? " light-mode" : ""}${setupProgress ? " has-setup-bar" : ""}`}>
       {/* ── Sidebar ── */}
       <aside className="sidebar">
         <div className="sidebar-top">
@@ -792,6 +808,32 @@ export default function App() {
         )}
         </div>
       </main>
+
+      {setupProgress && (
+        <div className={`setup-bar${setupProgress.stage === "error" ? " setup-bar--error" : ""}`}>
+          <span className="setup-bar__icon">
+            {setupProgress.stage === "error" ? "✕" : "⬇"}
+          </span>
+          <span className="setup-bar__message">{setupProgress.message}</span>
+          {setupProgress.stage !== "error" && (
+            <div className="setup-bar__track">
+              <div
+                className="setup-bar__fill"
+                style={{ width: `${setupProgress.percent}%` }}
+              />
+            </div>
+          )}
+          {setupProgress.stage !== "error" && (
+            <span style={{ color: "var(--text-3)", flexShrink: 0 }}>
+              {setupProgress.percent}%
+            </span>
+          )}
+        </div>
+      )}
+
+      {showToast && (
+        <div className="setup-toast">✓ Gemma 4 ready. Local AI postprocessing enabled.</div>
+      )}
     </div>
   );
 }
