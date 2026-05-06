@@ -29,9 +29,11 @@ pub async fn check_and_setup(app: AppHandle, db: Arc<Mutex<Connection>>) {
 
     emit(&app, "checking", 0, "Checking setup...");
 
-    if !winget_available() {
+    let winget_ok = tokio::task::spawn_blocking(winget_available).await.unwrap_or(false);
+    if !winget_ok {
         emit(&app, "installing_winget", 5, "Installing Windows Package Manager...");
-        if let Err(_) = install_winget().await {
+        if let Err(e) = install_winget().await {
+            eprintln!("install_winget error: {e}");
             emit(&app, "error", 0,
                 "Could not install Package Manager. Install Ollama manually at ollama.com");
             return;
@@ -52,7 +54,20 @@ pub async fn check_and_setup(app: AppHandle, db: Arc<Mutex<Connection>>) {
             emit(&app, "error", 0, &format!("Could not install Ollama: {e}"));
             return;
         }
-        tokio::time::sleep(std::time::Duration::from_secs(6)).await;
+        // Wait for Ollama service to start (poll up to 30s)
+        let mut started = false;
+        for _ in 0..30 {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            let (running, _) = check_ollama().await;
+            if running {
+                started = true;
+                break;
+            }
+        }
+        if !started {
+            emit(&app, "error", 0, "Ollama installed but did not start. Please restart the app.");
+            return;
+        }
     }
 
     if let Err(e) = pull_model(&app).await {
@@ -83,17 +98,16 @@ async fn install_winget() -> Result<(), String> {
     let bytes = reqwest::get(url)
         .await.map_err(|e| e.to_string())?
         .bytes()
-        .await.map_err(|e| e.to_string())?;
-
-    let tmp = std::env::temp_dir().join("AppInstaller.msixbundle");
-    std::fs::write(&tmp, &bytes).map_err(|e| e.to_string())?;
+        .await.map_err(|e| e.to_string())?
+        .to_vec();  // convert to Vec<u8> so it's Send
 
     tokio::task::spawn_blocking(move || {
+        let tmp = std::env::temp_dir().join("AppInstaller.msixbundle");
+        std::fs::write(&tmp, &bytes).map_err(|e| e.to_string())?;
         let status = std::process::Command::new("powershell")
-            .args([
-                "-NoProfile", "-NonInteractive", "-Command",
-                &format!("Add-AppxPackage -Path '{}'", tmp.display()),
-            ])
+            .args(["-NoProfile", "-NonInteractive", "-Command", "Add-AppxPackage"])
+            .arg("-Path")
+            .arg(&tmp)
             .status()
             .map_err(|e| e.to_string())?;
         if status.success() { Ok(()) } else { Err("Add-AppxPackage failed".to_string()) }
@@ -103,7 +117,11 @@ async fn install_winget() -> Result<(), String> {
 }
 
 async fn check_ollama() -> (bool, bool) {
-    let resp = reqwest::get("http://localhost:11434/api/tags").await;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+        .unwrap_or_default();
+    let resp = client.get("http://localhost:11434/api/tags").send().await;
     match resp {
         Ok(r) if r.status().is_success() => {
             let json: serde_json::Value = r.json().await.unwrap_or_default();
@@ -142,7 +160,7 @@ async fn pull_model(app: &AppHandle) -> Result<(), String> {
         let mut child = std::process::Command::new("ollama")
             .args(["pull", "gemma4-4b"])
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
             .spawn()
             .map_err(|e| e.to_string())?;
 
@@ -168,7 +186,10 @@ async fn pull_model(app: &AppHandle) -> Result<(), String> {
             }
         }
 
-        child.wait().map_err(|e| e.to_string())?;
+        let status = child.wait().map_err(|e| e.to_string())?;
+        if !status.success() {
+            return Err("ollama pull gemma4-4b failed".to_string());
+        }
         Ok(())
     })
     .await
