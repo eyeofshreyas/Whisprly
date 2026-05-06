@@ -21,7 +21,7 @@ fn emit(app: &AppHandle, stage: &str, percent: u8, message: &str) {
 
 pub async fn check_and_setup(app: AppHandle, db: Arc<Mutex<Connection>>) {
     {
-        let conn = db.lock().unwrap();
+        let conn = db.lock().expect("db mutex poisoned");
         if crate::db::get_setting(&conn, "setup_complete").as_deref() == Some("true") {
             return;
         }
@@ -43,7 +43,7 @@ pub async fn check_and_setup(app: AppHandle, db: Arc<Mutex<Connection>>) {
     let (ollama_running, model_present) = check_ollama().await;
 
     if ollama_running && model_present {
-        let conn = db.lock().unwrap();
+        let conn = db.lock().expect("db mutex poisoned");
         crate::db::set_setting(&conn, "setup_complete", "true").ok();
         return;
     }
@@ -76,7 +76,7 @@ pub async fn check_and_setup(app: AppHandle, db: Arc<Mutex<Connection>>) {
     }
 
     {
-        let conn = db.lock().unwrap();
+        let conn = db.lock().expect("db mutex poisoned");
         crate::db::set_setting(&conn, "setup_complete", "true").ok();
     }
 
