@@ -1235,3 +1235,77 @@ button.sidebar-user:hover { background: var(--bg-card-hover); }
 .field-select:focus {
   border-color: var(--accent);
 }
+
+/* ── Setup progress bar ─────────────────────────────────────────────────────── */
+.setup-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 36px;
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  font-size: 11px;
+  color: var(--text-2);
+  z-index: 200;
+}
+
+.setup-bar--error {
+  background: rgba(224, 82, 82, 0.12);
+  border-top-color: rgba(224, 82, 82, 0.3);
+  color: var(--red);
+}
+
+.setup-bar__icon {
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.setup-bar__message {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.setup-bar__track {
+  width: 120px;
+  height: 3px;
+  background: var(--border);
+  border-radius: var(--radius-pill);
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.setup-bar__fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: var(--radius-pill);
+  transition: width 0.4s ease-out;
+}
+
+/* ── Setup toast ────────────────────────────────────────────────────────────── */
+.setup-toast {
+  position: fixed;
+  bottom: 48px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 8px 16px;
+  border-radius: var(--radius-pill);
+  white-space: nowrap;
+  z-index: 300;
+  animation: toast-in 0.2s ease-out;
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
