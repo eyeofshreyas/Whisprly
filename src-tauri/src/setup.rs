@@ -29,6 +29,16 @@ pub async fn check_and_setup(app: AppHandle, db: Arc<Mutex<Connection>>) {
 
     emit(&app, "checking", 0, "Checking setup...");
 
+    #[cfg(target_os = "linux")]
+    if !crate::platform::input_group_ok() {
+        emit(
+            &app,
+            "warning",
+            0,
+            "Hotkey may not work. Run: sudo usermod -aG input $USER  (then log out and back in)",
+        );
+    }
+
     let winget_ok = tokio::task::spawn_blocking(winget_available).await.unwrap_or(false);
     if !winget_ok {
         emit(&app, "installing_winget", 5, "Installing Windows Package Manager...");
