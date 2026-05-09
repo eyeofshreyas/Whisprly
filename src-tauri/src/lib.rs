@@ -14,9 +14,10 @@ mod auto_type;
 mod db;
 mod hotkey;
 mod oauth;
-mod transcribe;
+mod platform;
 mod postprocess;
 mod setup;
+mod transcribe;
 
 pub enum HotkeyEvent {
     Start,
