@@ -162,11 +162,16 @@ async fn start_ollama(
     #[cfg(target_os = "windows")]
     {
         let _ = (app, ollama_process);
-        install_ollama_winget().await
+        return install_ollama_winget().await;
     }
     #[cfg(target_os = "linux")]
     {
-        start_ollama_bundled(app, ollama_process).await
+        return start_ollama_bundled(app, ollama_process).await;
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+    {
+        let _ = (app, ollama_process);
+        Ok(())
     }
 }
 
@@ -200,6 +205,10 @@ async fn start_ollama_bundled(
         .resource_dir()
         .map_err(|e| e.to_string())?
         .join("ollama");
+
+    if !bin.exists() {
+        return Err(format!("Bundled ollama binary not found at {}", bin.display()));
+    }
 
     tokio::task::spawn_blocking({
         let bin = bin.clone();
