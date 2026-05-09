@@ -41,10 +41,11 @@ pub struct AppSettings {
 }
 
 pub struct AppState {
-    pub settings:      Arc<Mutex<AppSettings>>,
-    pub db:            Arc<Mutex<Connection>>,
-    pub hotkey_tx:     tokio::sync::mpsc::UnboundedSender<HotkeyEvent>,
-    pub settings_path: std::path::PathBuf,
+    pub settings:       Arc<Mutex<AppSettings>>,
+    pub db:             Arc<Mutex<Connection>>,
+    pub hotkey_tx:      tokio::sync::mpsc::UnboundedSender<HotkeyEvent>,
+    pub settings_path:  std::path::PathBuf,
+    pub ollama_process: Arc<Mutex<Option<std::process::Child>>>,
 }
 
 struct RecordingHandle {
@@ -361,18 +362,23 @@ pub fn run() {
             let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<HotkeyEvent>();
             let cmd_tx = tx.clone();
 
+            let ollama_process: Arc<Mutex<Option<std::process::Child>>> =
+                Arc::new(Mutex::new(None));
+
             app.manage(AppState {
                 settings: settings.clone(),
                 db: db.clone(),
                 hotkey_tx: cmd_tx,
                 settings_path: settings_file.clone(),
+                ollama_process: ollama_process.clone(),
             });
 
             std::thread::spawn(move || hotkey::start_listener(tx));
             tauri::async_runtime::spawn(coordinator(rx, app_handle.clone(), settings, db.clone()));
             let db_for_setup = db.clone();
             let app_for_setup = app_handle.clone();
-            tauri::async_runtime::spawn(setup::check_and_setup(app_for_setup, db_for_setup));
+            let proc_for_setup = ollama_process.clone();
+            tauri::async_runtime::spawn(setup::check_and_setup(app_for_setup, db_for_setup, proc_for_setup));
 
             // ── System tray ──
             let open_i = MenuItem::with_id(app, "open", "Open Whisprly", true, None::<&str>)?;
@@ -391,7 +397,16 @@ pub fn run() {
                             let _ = w.set_focus();
                         }
                     }
-                    "quit" => app.exit(0),
+                    "quit" => {
+                        if let Some(state) = app.try_state::<AppState>() {
+                            if let Ok(mut guard) = state.ollama_process.lock() {
+                                if let Some(child) = guard.as_mut() {
+                                    child.kill().ok();
+                                }
+                            }
+                        }
+                        app.exit(0);
+                    }
                     _ => {}
                 })
                 .on_tray_icon_event(|tray, event| {

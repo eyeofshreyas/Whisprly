@@ -1,4 +1,3 @@
-use std::io::{BufRead, BufReader};
 use std::sync::{Arc, Mutex};
 use rusqlite::Connection;
 use serde::Serialize;
@@ -19,7 +18,11 @@ fn emit(app: &AppHandle, stage: &str, percent: u8, message: &str) {
     }).ok();
 }
 
-pub async fn check_and_setup(app: AppHandle, db: Arc<Mutex<Connection>>) {
+pub async fn check_and_setup(
+    app: AppHandle,
+    db: Arc<Mutex<Connection>>,
+    ollama_process: std::sync::Arc<std::sync::Mutex<Option<std::process::Child>>>,
+) {
     {
         let conn = db.lock().expect("db mutex poisoned");
         if crate::db::get_setting(&conn, "setup_complete").as_deref() == Some("true") {
@@ -39,14 +42,17 @@ pub async fn check_and_setup(app: AppHandle, db: Arc<Mutex<Connection>>) {
         );
     }
 
-    let winget_ok = tokio::task::spawn_blocking(winget_available).await.unwrap_or(false);
-    if !winget_ok {
-        emit(&app, "installing_winget", 5, "Installing Windows Package Manager...");
-        if let Err(e) = install_winget().await {
-            eprintln!("install_winget error: {e}");
-            emit(&app, "error", 0,
-                "Could not install Package Manager. Install Ollama manually at ollama.com");
-            return;
+    #[cfg(target_os = "windows")]
+    {
+        let winget_ok = tokio::task::spawn_blocking(winget_available).await.unwrap_or(false);
+        if !winget_ok {
+            emit(&app, "installing_winget", 5, "Installing Windows Package Manager...");
+            if let Err(e) = install_winget().await {
+                eprintln!("install_winget error: {e}");
+                emit(&app, "error", 0,
+                    "Could not install Package Manager. Install Ollama manually at ollama.com");
+                return;
+            }
         }
     }
 
@@ -59,12 +65,14 @@ pub async fn check_and_setup(app: AppHandle, db: Arc<Mutex<Connection>>) {
     }
 
     if !ollama_running {
-        emit(&app, "installing_ollama", 20, "Installing Ollama...");
-        if let Err(e) = install_ollama().await {
-            emit(&app, "error", 0, &format!("Could not install Ollama: {e}"));
-            return;
+        emit(&app, "installing_ollama", 20, "Starting Ollama...");
+        match start_ollama(&app, &ollama_process).await {
+            Ok(()) => {}
+            Err(e) => {
+                emit(&app, "error", 0, &format!("Could not start Ollama: {e}"));
+                return;
+            }
         }
-        // Wait for Ollama service to start (poll up to 30s)
         let mut started = false;
         for _ in 0..30 {
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
@@ -75,7 +83,7 @@ pub async fn check_and_setup(app: AppHandle, db: Arc<Mutex<Connection>>) {
             }
         }
         if !started {
-            emit(&app, "error", 0, "Ollama installed but did not start. Please restart the app.");
+            emit(&app, "error", 0, "Ollama did not start in time. Please restart the app.");
             return;
         }
     }
@@ -147,7 +155,23 @@ async fn check_ollama() -> (bool, bool) {
     }
 }
 
-async fn install_ollama() -> Result<(), String> {
+async fn start_ollama(
+    app: &AppHandle,
+    ollama_process: &std::sync::Arc<std::sync::Mutex<Option<std::process::Child>>>,
+) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = (app, ollama_process);
+        install_ollama_winget().await
+    }
+    #[cfg(target_os = "linux")]
+    {
+        start_ollama_bundled(app, ollama_process).await
+    }
+}
+
+#[cfg(target_os = "windows")]
+async fn install_ollama_winget() -> Result<(), String> {
     tokio::task::spawn_blocking(|| {
         let status = std::process::Command::new("winget")
             .args([
@@ -164,10 +188,45 @@ async fn install_ollama() -> Result<(), String> {
     .map_err(|e| e.to_string())?
 }
 
+#[cfg(target_os = "linux")]
+async fn start_ollama_bundled(
+    app: &AppHandle,
+    ollama_process: &std::sync::Arc<std::sync::Mutex<Option<std::process::Child>>>,
+) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let bin = app
+        .path()
+        .resource_dir()
+        .map_err(|e| e.to_string())?
+        .join("ollama");
+
+    tokio::task::spawn_blocking({
+        let bin = bin.clone();
+        move || {
+            std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755))
+                .map_err(|e| e.to_string())
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    let child = std::process::Command::new(&bin)
+        .arg("serve")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| format!("failed to spawn bundled ollama: {e}"))?;
+
+    *ollama_process.lock().expect("ollama_process mutex poisoned") = Some(child);
+    Ok(())
+}
+
 async fn pull_model(app: &AppHandle) -> Result<(), String> {
     let app = app.clone();
     tokio::task::spawn_blocking(move || {
-        let mut child = std::process::Command::new("ollama")
+        let ollama = ollama_bin(&app);
+        let mut child = std::process::Command::new(&ollama)
             .args(["pull", "gemma4-4b"])
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
@@ -175,7 +234,8 @@ async fn pull_model(app: &AppHandle) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
 
         if let Some(stdout) = child.stdout.take() {
-            for line in BufReader::new(stdout).lines() {
+            use std::io::BufRead;
+            for line in std::io::BufReader::new(stdout).lines() {
                 let line = match line { Ok(l) => l, Err(_) => continue };
                 let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
 
@@ -204,4 +264,19 @@ async fn pull_model(app: &AppHandle) -> Result<(), String> {
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+fn ollama_bin(app: &AppHandle) -> std::path::PathBuf {
+    #[cfg(target_os = "linux")]
+    {
+        app.path()
+            .resource_dir()
+            .unwrap_or_default()
+            .join("ollama")
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = app;
+        std::path::PathBuf::from("ollama")
+    }
 }
