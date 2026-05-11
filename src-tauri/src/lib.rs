@@ -18,6 +18,8 @@ mod platform;
 mod postprocess;
 mod setup;
 mod transcribe;
+#[cfg(target_os = "linux")]
+mod shortcut_wayland;
 
 pub enum HotkeyEvent {
     Start,
@@ -335,6 +337,7 @@ pub fn run() {
     }));
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
             let db_path = app.path().app_data_dir()
                 .expect("no app data dir")
@@ -373,7 +376,33 @@ pub fn run() {
                 ollama_process: ollama_process.clone(),
             });
 
-            std::thread::spawn(move || hotkey::start_listener(tx));
+            #[cfg(target_os = "linux")]
+            {
+                let is_wayland = std::env::var("WAYLAND_DISPLAY").is_ok();
+                if is_wayland {
+                    tauri::async_runtime::spawn(shortcut_wayland::register(tx));
+                } else {
+                    use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+                    let shortcut = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::Space);
+                    app.handle().global_shortcut().on_shortcut(shortcut, move |_app, _sc, event| {
+                        match event.state() {
+                            ShortcutState::Pressed  => { let _ = tx.send(HotkeyEvent::Start); }
+                            ShortcutState::Released => { let _ = tx.send(HotkeyEvent::Stop); }
+                        }
+                    })?;
+                }
+            }
+            #[cfg(target_os = "windows")]
+            {
+                use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+                let shortcut = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::Space);
+                app.handle().global_shortcut().on_shortcut(shortcut, move |_app, _sc, event| {
+                    match event.state() {
+                        ShortcutState::Pressed  => { let _ = tx.send(HotkeyEvent::Start); }
+                        ShortcutState::Released => { let _ = tx.send(HotkeyEvent::Stop); }
+                    }
+                })?;
+            }
             tauri::async_runtime::spawn(coordinator(rx, app_handle.clone(), settings, db.clone()));
             let db_for_setup = db.clone();
             let app_for_setup = app_handle.clone();

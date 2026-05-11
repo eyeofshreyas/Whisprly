@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 use rusqlite::Connection;
 use serde::Serialize;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 #[derive(Serialize, Clone)]
 struct SetupProgress {
@@ -31,16 +31,6 @@ pub async fn check_and_setup(
     }
 
     emit(&app, "checking", 0, "Checking setup...");
-
-    #[cfg(target_os = "linux")]
-    if !crate::platform::input_group_ok() {
-        emit(
-            &app,
-            "warning",
-            0,
-            "Hotkey may not work. Run: sudo usermod -aG input $USER  (then log out and back in)",
-        );
-    }
 
     #[cfg(target_os = "windows")]
     {
@@ -88,8 +78,8 @@ pub async fn check_and_setup(
         }
     }
 
-    if let Err(e) = pull_model(&app).await {
-        emit(&app, "error", 0, &format!("Model download failed: {e}"));
+    if let Err(e) = create_model(&app).await {
+        emit(&app, "error", 0, &format!("Model import failed: {e}"));
         return;
     }
 
@@ -101,6 +91,7 @@ pub async fn check_and_setup(
     emit(&app, "done", 100, "Gemma 4 ready. Local AI postprocessing enabled.");
 }
 
+#[cfg(target_os = "windows")]
 fn winget_available() -> bool {
     std::process::Command::new("winget")
         .arg("--version")
@@ -109,6 +100,7 @@ fn winget_available() -> bool {
         .unwrap_or(false)
 }
 
+#[cfg(target_os = "windows")]
 async fn install_winget() -> Result<(), String> {
     let url = "https://github.com/microsoft/winget-cli/releases/latest/download/\
                Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle";
@@ -146,7 +138,7 @@ async fn check_ollama() -> (bool, bool) {
             let has_model = json["models"]
                 .as_array()
                 .map(|ms| ms.iter().any(|m| {
-                    m["name"].as_str().unwrap_or("").starts_with("gemma4-4b")
+                    m["name"].as_str().unwrap_or("").starts_with("gemma4:4b")
                 }))
                 .unwrap_or(false);
             (true, has_model)
@@ -231,12 +223,23 @@ async fn start_ollama_bundled(
     Ok(())
 }
 
-async fn pull_model(app: &AppHandle) -> Result<(), String> {
+async fn create_model(app: &AppHandle) -> Result<(), String> {
     let app = app.clone();
     tokio::task::spawn_blocking(move || {
         let ollama = ollama_bin(&app);
+        let gguf   = gguf_path(&app);
+
+        if !gguf.exists() {
+            return Err(format!("Model file not found: {}", gguf.display()));
+        }
+
+        let tmp_modelfile = std::env::temp_dir().join("whisprly_modelfile");
+        std::fs::write(&tmp_modelfile, format!("FROM {}\n", gguf.display()))
+            .map_err(|e| format!("failed to write Modelfile: {e}"))?;
+
         let mut child = std::process::Command::new(&ollama)
-            .args(["pull", "gemma4-4b"])
+            .args(["create", "gemma4:4b", "-f"])
+            .arg(&tmp_modelfile)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .spawn()
@@ -246,33 +249,46 @@ async fn pull_model(app: &AppHandle) -> Result<(), String> {
             use std::io::BufRead;
             for line in std::io::BufReader::new(stdout).lines() {
                 let line = match line { Ok(l) => l, Err(_) => continue };
-                let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
+                let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) else {
+                    emit(&app, "pulling_model", 0, &line);
+                    continue;
+                };
 
                 let completed = json["completed"].as_u64().unwrap_or(0);
                 let total     = json["total"].as_u64().unwrap_or(0);
                 let percent   = if total > 0 { (completed * 100 / total).min(99) as u8 } else { 0 };
                 let message   = if total > 0 {
                     format!(
-                        "Downloading Gemma 4 ({:.1} GB / {:.1} GB)",
+                        "Importing model ({:.1} GB / {:.1} GB)",
                         completed as f64 / 1e9,
                         total as f64 / 1e9,
                     )
                 } else {
-                    json["status"].as_str().unwrap_or("Downloading...").to_string()
+                    json["status"].as_str().unwrap_or("Importing model...").to_string()
                 };
 
                 emit(&app, "pulling_model", percent, &message);
             }
         }
 
+        let _ = std::fs::remove_file(&tmp_modelfile);
+
         let status = child.wait().map_err(|e| e.to_string())?;
         if !status.success() {
-            return Err("ollama pull gemma4-4b failed".to_string());
+            return Err("ollama create gemma4:4b failed".to_string());
         }
         Ok(())
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+fn gguf_path(app: &AppHandle) -> std::path::PathBuf {
+    app.path()
+        .resource_dir()
+        .unwrap_or_default()
+        .join("Modelfile")
+        .join("gemma-4-E4B-it-Q4_K_M.gguf")
 }
 
 fn ollama_bin(app: &AppHandle) -> std::path::PathBuf {

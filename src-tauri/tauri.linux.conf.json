@@ -1,6 +1,9 @@
 {
   "bundle": {
     "targets": ["appimage"],
-    "externalBin": ["binaries/ollama"]
+    "externalBin": ["binaries/ollama"],
+    "resources": {
+      "../Modelfile/gemma-4-E4B-it-Q4_K_M.gguf": "Modelfile/gemma-4-E4B-it-Q4_K_M.gguf"
+    }
   }
 }
