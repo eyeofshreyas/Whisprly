@@ -1,5 +1,5 @@
 use ashpd::desktop::global_shortcuts::{GlobalShortcuts, NewShortcut};
-use futures_util::StreamExt;
+use futures_lite::StreamExt;
 
 pub async fn register(tx: tokio::sync::mpsc::UnboundedSender<crate::HotkeyEvent>) {
     let proxy = match GlobalShortcuts::new().await {

@@ -1,3 +1,4 @@
+#[allow(deprecated)]
 use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
     SampleFormat,
@@ -10,12 +11,20 @@ use std::sync::{
 pub fn record(stop: Arc<AtomicBool>, chunk_tx: std::sync::mpsc::Sender<Vec<f32>>) {
     let host = cpal::default_host();
 
-    let device = match host.default_input_device() {
-        Some(d) => d,
-        None => {
-            eprintln!("No input device found");
-            return;
-        }
+    let all_inputs: Vec<_> = host.input_devices().map(|d| d.collect()).unwrap_or_default();
+    for dev in &all_inputs {
+        eprintln!("[audio] available input: {}", dev.name().unwrap_or_default());
+    }
+
+    // On this system pipewire/pulse/default return all-zeros via ALSA;
+    // prefer the real hardware device (hw:CARD=...) when available.
+    let device = match host.input_devices()
+        .ok()
+        .and_then(|mut it| it.find(|d| d.name().unwrap_or_default().starts_with("hw:")))
+        .or_else(|| host.default_input_device())
+    {
+        Some(d) => { eprintln!("[audio] using device: {}", d.name().unwrap_or_default()); d }
+        None    => { eprintln!("[audio] No input device found"); return; }
     };
 
     let config = match device.default_input_config() {
@@ -26,7 +35,7 @@ pub fn record(stop: Arc<AtomicBool>, chunk_tx: std::sync::mpsc::Sender<Vec<f32>>
         }
     };
 
-    let sample_rate = config.sample_rate().0;
+    let sample_rate = config.sample_rate();
     let channels = config.channels();
     let samples: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::new()));
 
@@ -107,6 +116,10 @@ pub fn record(stop: Arc<AtomicBool>, chunk_tx: std::sync::mpsc::Sender<Vec<f32>>
     drop(stream);
 
     let raw_samples = samples.lock().unwrap().clone();
+    let rms = if raw_samples.is_empty() { 0.0 } else {
+        (raw_samples.iter().map(|&s| s*s).sum::<f32>() / raw_samples.len() as f32).sqrt()
+    };
+    eprintln!("[audio] captured {} samples, RMS={:.4}", raw_samples.len(), rms);
 
     // Convert to mono and resample to 16kHz
     let mono = to_mono(&raw_samples, channels as usize);
