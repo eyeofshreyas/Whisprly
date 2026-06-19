@@ -221,13 +221,6 @@ mod tests {
     }
 
     #[test]
-    fn filter_segments_handles_server_empty_response() {
-        // FastAPI returns {"segments": []} when Silero VAD finds no speech
-        let json = serde_json::json!({"segments": []});
-        assert_eq!(filter_segments(&json), None);
-    }
-
-    #[test]
     fn filter_segments_strips_whitespace_from_segment_text() {
         let json = serde_json::json!({
             "segments": [

@@ -124,7 +124,7 @@ pub fn record(stop: Arc<AtomicBool>, chunk_tx: std::sync::mpsc::Sender<Vec<f32>>
 
     // Trim leading/trailing silence and apply minimum-duration gate.
     // Each speech frame is 480 samples = 30ms at 16kHz.
-    // Fewer than 17 frames (< 510ms) = accidental press; discard silently.
+    // Fewer than 17 frames (< 510ms) = accidental press; discard.
     let trimmed = trim_silence(&resampled);
     if !trimmed.is_empty() && !is_silent(trimmed) {
         let speech_frames = trimmed.chunks(480)
