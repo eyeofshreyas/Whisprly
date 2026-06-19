@@ -4,7 +4,7 @@
   <p><strong>Hold a key. Speak. Release. Your words appear — polished and typed — right where you left off.</strong></p>
 
   <p>
-    <img src="https://img.shields.io/badge/platform-Windows-blue?style=flat-square&logo=windows" />
+    <img src="https://img.shields.io/badge/platform-Windows%20|%20Linux-blue?style=flat-square&logo=windows" />
     <img src="https://img.shields.io/badge/built%20with-Tauri%20v2-24C8DB?style=flat-square&logo=tauri" />
     <img src="https://img.shields.io/badge/backend-Rust-orange?style=flat-square&logo=rust" />
     <img src="https://img.shields.io/badge/transcription-Groq%20Whisper-blueviolet?style=flat-square" />
@@ -22,7 +22,7 @@
 
 ---
 
-**Whisprly** is a Windows desktop dictation app that turns speech into polished, auto-typed text in any app — browser, IDE, Slack, Word, terminal — in under a second. No clicking. No copy-pasting. Just press a hotkey, speak naturally, and let go.
+**Whisprly** is a cross-platform (Windows & Linux Wayland/X11) desktop dictation app that turns speech into polished, auto-typed text in any app — browser, IDE, Slack, Word, terminal — in under a second. No clicking. No copy-pasting. Just press a hotkey, speak naturally, and let go.
 
 > Built with Tauri v2 (Rust backend) + React frontend. Transcription via Groq's `whisper-large-v3-turbo`. AI cleanup via `llama-3.1-8b-instant`. Everything private by default — transcripts stay on your machine in SQLite.
 
@@ -56,12 +56,18 @@
 | Node.js 18+ | |
 | Rust stable | [rustup.rs](https://rustup.rs) |
 | Python 3.9+ *(optional)* | Local transcription fallback |
+| Linux dependencies | `scripts/install-linux-deps.sh` |
 
 ### 1. Clone & install
 
 ```bash
 git clone https://github.com/your-username/whisprly.git
 cd whisprly
+
+# On Linux, install system dependencies first:
+# chmod +x scripts/install-linux-deps.sh
+# ./scripts/install-linux-deps.sh
+
 npm install
 ```
 
@@ -183,7 +189,7 @@ src-tauri/src/
   hotkey.rs                rdev global hotkey listener (Ctrl + Win)
   transcribe.rs            Groq + local transcription · hallucination filter
   postprocess.rs           Groq LLM + Ollama AI polish
-  auto_type.rs             Types text into focused window via enigo
+  auto_type.rs             Types text into focused window via enigo (ydotool for Wayland)
   db.rs                    SQLite init · CRUD · FTS5 full-text search
   oauth.rs                 Google OAuth PKCE flow
 
@@ -193,7 +199,7 @@ sidecar/
   requirements.txt
 ```
 
-**Stack:** Tauri v2 · Rust · React · TypeScript · SQLite (rusqlite) · cpal · enigo · rdev · Groq API · Firebase Auth
+**Stack:** Tauri v2 · Rust · React · TypeScript · SQLite (rusqlite) · cpal · enigo / ydotool · rdev · Groq API · Firebase Auth
 
 ---
 
