@@ -136,11 +136,9 @@ pub async fn local(
     }
 
     let json: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
-    let text = json["text"]
-        .as_str()
-        .ok_or_else(|| "No text returned from whisper server".to_string())?
-        .trim()
-        .to_string();
+
+    let text = filter_segments(&json)
+        .ok_or_else(|| "no_speech".to_string())?;
 
     if is_hallucination(&text) {
         return Err("hallucination".into());
@@ -220,5 +218,22 @@ mod tests {
     fn filter_segments_returns_none_on_empty_array() {
         let json = serde_json::json!({"segments": []});
         assert_eq!(filter_segments(&json), None);
+    }
+
+    #[test]
+    fn filter_segments_handles_server_empty_response() {
+        // FastAPI returns {"segments": []} when Silero VAD finds no speech
+        let json = serde_json::json!({"segments": []});
+        assert_eq!(filter_segments(&json), None);
+    }
+
+    #[test]
+    fn filter_segments_strips_whitespace_from_segment_text() {
+        let json = serde_json::json!({
+            "segments": [
+                {"text": "  Hello.  ", "no_speech_prob": 0.01}
+            ]
+        });
+        assert_eq!(filter_segments(&json), Some("Hello.".to_string()));
     }
 }
