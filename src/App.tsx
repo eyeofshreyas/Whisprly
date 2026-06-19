@@ -1,5 +1,5 @@
 import "./index.css";
-import logo from "./assets/logo.png";
+import logo from "./assets/logo.svg";
 import { memo, useEffect, useState, useCallback, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
