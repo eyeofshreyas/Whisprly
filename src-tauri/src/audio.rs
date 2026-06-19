@@ -11,20 +11,14 @@ use std::sync::{
 pub fn record(stop: Arc<AtomicBool>, chunk_tx: std::sync::mpsc::Sender<Vec<f32>>) {
     let host = cpal::default_host();
 
-    let all_inputs: Vec<_> = host.input_devices().map(|d| d.collect()).unwrap_or_default();
-    for dev in &all_inputs {
-        eprintln!("[audio] available input: {}", dev.name().unwrap_or_default());
-    }
-
-    // On this system pipewire/pulse/default return all-zeros via ALSA;
-    // prefer the real hardware device (hw:CARD=...) when available.
-    let device = match host.input_devices()
-        .ok()
-        .and_then(|mut it| it.find(|d| d.name().unwrap_or_default().starts_with("hw:")))
-        .or_else(|| host.default_input_device())
-    {
-        Some(d) => { eprintln!("[audio] using device: {}", d.name().unwrap_or_default()); d }
-        None    => { eprintln!("[audio] No input device found"); return; }
+    // Use the default input device — PipeWire/PulseAudio handles device
+    // routing correctly on modern Linux; no need to prefer hw: directly.
+    let device = match host.default_input_device() {
+        Some(d) => {
+            eprintln!("[audio] using device: {}", d.description().ok().map(|d| d.name().to_owned()).unwrap_or_else(|| "unknown".into()));
+            d
+        }
+        None => { eprintln!("[audio] No input device found"); return; }
     };
 
     let config = match device.default_input_config() {
@@ -123,22 +117,59 @@ pub fn record(stop: Arc<AtomicBool>, chunk_tx: std::sync::mpsc::Sender<Vec<f32>>
 
     // Convert to mono and resample to 16kHz
     let mono = to_mono(&raw_samples, channels as usize);
-    let resampled = resample_to_16k(&mono, sample_rate);
+    let mut resampled = resample_to_16k(&mono, sample_rate);
 
-    // Process through VAD + Chunker
-    let mut chunker = Chunker::new(chunk_tx);
-    for frame in resampled.chunks(480) {
-        if frame.len() == 480 {
-            let is_speech = is_speech_frame(frame);
-            chunker.push_frame(frame, is_speech);
-        } else if !frame.is_empty() {
-            let mut padded = frame.to_vec();
-            padded.resize(480, 0.0);
-            let is_speech = is_speech_frame(&padded);
-            chunker.push_frame(&padded, is_speech);
+    // Normalize audio volume to standard 0.8 peak amplitude
+    normalize_audio(&mut resampled);
+
+    // Trim leading/trailing silence and send a single unified audio buffer
+    let trimmed = trim_silence(&resampled);
+    if !trimmed.is_empty() && !is_silent(trimmed) {
+        chunk_tx.send(trimmed.to_vec()).ok();
+    }
+}
+
+/// Dynamically scale audio gain to 0.8 peak amplitude to optimize for Whisper feature encoder.
+pub fn normalize_audio(samples: &mut [f32]) {
+    let mut max_peak = 0.0f32;
+    for &s in samples.iter() {
+        let abs = s.abs();
+        if abs > max_peak {
+            max_peak = abs;
         }
     }
-    chunker.flush(); // emit any in-progress speech on hotkey release
+    if max_peak > 0.01 && max_peak < 0.8 {
+        let multiplier = 0.8 / max_peak;
+        for s in samples.iter_mut() {
+            *s *= multiplier;
+        }
+        eprintln!("[audio] normalized gain by multiplier: {:.2}", multiplier);
+    }
+}
+
+/// Trim leading and trailing silence from the audio samples using 30ms (480-sample) frames.
+pub fn trim_silence(samples: &[f32]) -> &[f32] {
+    let mut start = 0;
+    while start + 480 <= samples.len() {
+        if is_speech_frame(&samples[start..start + 480]) {
+            break;
+        }
+        start += 480;
+    }
+
+    let mut end = samples.len();
+    while end >= start + 480 {
+        if is_speech_frame(&samples[end - 480..end]) {
+            break;
+        }
+        end -= 480;
+    }
+
+    if start >= end {
+        &[]
+    } else {
+        &samples[start..end]
+    }
 }
 
 /// Returns true when the recording is effectively silent (no speech detected).
@@ -217,10 +248,13 @@ pub fn to_wav_from_samples(samples: Vec<f32>) -> Vec<u8> {
 }
 
 // 17 × 30ms ≈ 510ms silence before flushing a chunk
+#[allow(dead_code)]
 const SILENCE_THRESHOLD_FRAMES: usize = 17;
 // 10 × 30ms = 300ms minimum — discard sub-word fragments
+#[allow(dead_code)]
 const MIN_CHUNK_FRAMES: usize = 10;
 
+#[allow(dead_code)]
 pub struct Chunker {
     sender: std::sync::mpsc::Sender<Vec<f32>>,
     buffer: Vec<f32>,
@@ -228,6 +262,7 @@ pub struct Chunker {
     has_speech: bool,
 }
 
+#[allow(dead_code)]
 impl Chunker {
     pub fn new(sender: std::sync::mpsc::Sender<Vec<f32>>) -> Self {
         Chunker { sender, buffer: Vec::new(), silence_count: 0, has_speech: false }

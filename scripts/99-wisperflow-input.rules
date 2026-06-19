@@ -1,0 +1,11 @@
+# WisperFlow udev rule — grants the 'input' group read access to all
+# input event devices, enabling rdev to listen for global hotkeys without
+# requiring root privileges.
+#
+# Install:
+#   sudo cp scripts/99-wisperflow-input.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules
+#   sudo usermod -aG input $USER
+#   (then log out and back in)
+
+KERNEL=="event*", SUBSYSTEM=="input", GROUP="input", MODE="0660"

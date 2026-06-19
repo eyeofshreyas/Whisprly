@@ -13,6 +13,9 @@ tauri-build = { version = "2", features = [] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 evdev = "0.12"
+ashpd = "0.10"
+futures-lite = "2"
+arboard = "3"
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
@@ -22,7 +25,7 @@ tokio = { version = "1", features = ["full"] }
 cpal = "0.17"
 hound = "3"
 reqwest = { version = "0.12", features = ["multipart", "json"] }
-enigo = "0.2"
+enigo = { version = "0.2", features = ["x11rb", "wayland"] }
 tempfile = "3"
 tauri-plugin-global-shortcut = "2"
 dotenvy = "0.15"

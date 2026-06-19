@@ -38,14 +38,17 @@ pub struct AppSettings {
     pub postprocess_model: String,
     pub output_mode: String,
     pub language: String,
+    pub custom_vocabulary: String,
+    pub custom_instructions: String,
 }
 
 pub struct AppState {
-    pub settings:       Arc<Mutex<AppSettings>>,
-    pub db:             Arc<Mutex<Connection>>,
-    pub hotkey_tx:      tokio::sync::mpsc::UnboundedSender<HotkeyEvent>,
-    pub settings_path:  std::path::PathBuf,
-    pub ollama_process: Arc<Mutex<Option<std::process::Child>>>,
+    pub settings:        Arc<Mutex<AppSettings>>,
+    pub db:              Arc<Mutex<Connection>>,
+    pub hotkey_tx:       tokio::sync::mpsc::UnboundedSender<HotkeyEvent>,
+    pub settings_path:   std::path::PathBuf,
+    pub ollama_process:  Arc<Mutex<Option<std::process::Child>>>,
+    pub whisper_process: Arc<Mutex<Option<std::process::Child>>>,
 }
 
 struct RecordingHandle {
@@ -129,10 +132,11 @@ async fn coordinator(
                         }
                     }
 
-                    // Drain all chunks from the channel
+                    // Drain and flatten all captured audio samples
                     let chunks: Vec<Vec<f32>> = chunk_rx.try_iter().collect();
+                    let combined_samples: Vec<f32> = chunks.into_iter().flatten().collect();
 
-                    if chunks.is_empty() {
+                    if combined_samples.is_empty() {
                         emit_status(&app, "idle", Some("No audio captured".into()));
                         hide_overlay(&app);
                         continue;
@@ -140,57 +144,132 @@ async fn coordinator(
 
                     let s = settings.lock().unwrap().clone();
                     let language = transcribe::language_param(&s.language);
-                    let mut used_engine = "local".to_string();
-                    let mut session_texts: Vec<String> = Vec::new();
+                    let wav = audio::to_wav_from_samples(combined_samples);
 
-                    for chunk in chunks {
-                        if audio::is_silent(&chunk) { continue; }
-                        let wav = audio::to_wav_from_samples(chunk);
-
-                        let mut chunk_engine = "local";
-                        let text = if !s.groq_api_key.is_empty() {
-                            transcribe::groq(&wav, &s.groq_api_key, language.clone()).await.ok()
-                        } else {
-                            None
-                        };
-
-                        let text = match text {
-                            Some(t) if !t.is_empty() => {
-                                chunk_engine = "groq";
-                                Some(t)
+                    // Fetch the last transcription as context for prompt chaining, combining it with custom vocabulary
+                    let final_prompt = {
+                        let mut prompt_content = String::new();
+                        let custom_vocab = s.custom_vocabulary.trim();
+                        if !custom_vocab.is_empty() {
+                            prompt_content.push_str("Vocabulary: ");
+                            prompt_content.push_str(custom_vocab);
+                            if s.language == "hi" || s.language == "auto" {
+                                prompt_content.push_str(", ki, saath, mein, karta, hai, is, baat, aap, kaise, hain, kar, raha, tha, project, phone, disturbance, o'clock");
                             }
-                            _ => transcribe::local(&wav, &s.python_cmd, &s.sidecar_path, language.clone()).await.ok(),
+                            prompt_content.push_str(". ");
+                        } else if s.language == "hi" || s.language == "auto" {
+                            prompt_content.push_str("Vocabulary: ki, saath, mein, karta, hai, is, baat, aap, kaise, hain, kar, raha, tha, project, phone, disturbance, o'clock. ");
+                        }
+
+                        let last_tx = {
+                            let conn = db.lock().unwrap();
+                            db::get_transcripts(&conn, 1)
+                                .ok()
+                                .and_then(|list| list.first().map(|entry| entry.text.clone()))
                         };
 
-                        if let Some(t) = text {
-                            if !t.is_empty() {
-                                used_engine = chunk_engine.to_string();
-                                session_texts.push(t);
+                        if let Some(prev) = last_tx {
+                            prompt_content.push_str(&prev);
+                        }
+
+                        if prompt_content.is_empty() {
+                            None
+                        } else {
+                            // Enforce Whisper prompt limit (approx 224 tokens)
+                            let char_limit = 1000;
+                            let char_count = prompt_content.chars().count();
+                            if char_count > char_limit {
+                                Some(prompt_content.chars().skip(char_count - char_limit).collect::<String>())
+                            } else {
+                                Some(prompt_content)
+                            }
+                        }
+                    };
+
+                    let mut used_engine = "local".to_string();
+                    let mut transcription_result = None;
+
+                    if !s.groq_api_key.is_empty() {
+                        eprintln!("[transcribe] calling Groq with prompt context: {:?}", final_prompt);
+                        match transcribe::groq(&wav, &s.groq_api_key, language.clone(), final_prompt.clone()).await {
+                            Ok(t) => {
+                                eprintln!("[transcribe] Groq ok: {:?}", t);
+                                used_engine = "groq".to_string();
+                                transcription_result = Some(t);
+                            }
+                            Err(e) => {
+                                eprintln!("[transcribe] Groq error: {e}");
                             }
                         }
                     }
 
-                    if session_texts.is_empty() {
-                        emit_status(&app, "idle", Some("Nothing transcribed".into()));
-                        hide_overlay(&app);
-                        continue;
-                    }
+                    let transcription_result = match transcription_result {
+                        Some(t) => Some(t),
+                        None => {
+                            eprintln!("[transcribe] falling back to local sidecar with prompt context: {:?}", final_prompt);
+                            match transcribe::local(&wav, &s.python_cmd, &s.sidecar_path, language.clone(), final_prompt.clone()).await {
+                                Ok(t) => {
+                                    eprintln!("[transcribe] local ok: {:?}", t);
+                                    used_engine = "local".to_string();
+                                    Some(t)
+                                }
+                                Err(e) => {
+                                    eprintln!("[transcribe] local error: {e}");
+                                    None
+                                }
+                            }
+                        }
+                    };
 
-                    let raw_text = session_texts.join(" ");
+                    let raw_text = match transcription_result {
+                        Some(t) if !t.is_empty() => t,
+                        _ => {
+                            emit_status(&app, "idle", Some("Nothing transcribed".into()));
+                            hide_overlay(&app);
+                            continue;
+                        }
+                    };
+
+                    let mut resolved_mode = s.output_mode.clone();
+                    if resolved_mode == "auto" {
+                        if let Some(win_title) = platform::get_active_window_title() {
+                            let title_lower = win_title.to_lowercase();
+                            eprintln!("[coordinator] active window title: {title_lower}");
+                            if title_lower.contains("code") || title_lower.contains("cursor") || title_lower.contains("vscode") || title_lower.contains("vim") || title_lower.contains("terminal") || title_lower.contains("bash") || title_lower.contains("sh") || title_lower.contains("zsh") {
+                                resolved_mode = "code".to_string();
+                            } else if title_lower.contains("mail") || title_lower.contains("outlook") || title_lower.contains("thunderbird") || title_lower.contains("gmail") {
+                                resolved_mode = "email".to_string();
+                            } else {
+                                resolved_mode = "prose".to_string();
+                            }
+                        } else {
+                            resolved_mode = "prose".to_string();
+                        }
+                        eprintln!("[coordinator] auto-resolved mode to: {resolved_mode}");
+                    }
 
                     let polished = postprocess::polish(
                         &raw_text,
-                        &s.output_mode,
+                        &resolved_mode,
                         &s.postprocess_model,
                         &s.groq_api_key,
                         &s.python_cmd,
+                        &s.custom_vocabulary,
+                        &s.custom_instructions,
                     )
                     .await
                     .unwrap_or_else(|_| raw_text.clone());
 
                     let p = polished.clone();
+                    eprintln!("[auto_type] typing: {:?}", p);
+
+                    // Hide the overlay first so GNOME Wayland returns focus to
+                    // the user's target window before ydotool injects keystrokes.
+                    hide_overlay(&app);
+                    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
                     if let Err(e) = tokio::task::spawn_blocking(move || auto_type::type_text(&p)).await {
-                        eprintln!("auto_type failed: {e:?}");
+                        eprintln!("[auto_type] spawn_blocking failed: {e:?}");
                     }
 
                     let db_entry = db::TranscriptEntry {
@@ -198,7 +277,7 @@ async fn coordinator(
                         text: polished,
                         raw_text: Some(raw_text),
                         engine: used_engine.clone(),
-                        mode: s.output_mode.clone(),
+                        mode: resolved_mode.clone(),
                         language: language.clone(),
                         timestamp: chrono::Utc::now().to_rfc3339(),
                     };
@@ -228,19 +307,28 @@ async fn save_settings(
     groq_api_key: String,
     python_cmd: String,
     language: String,
+    postprocess_model: String,
+    custom_vocabulary: String,
+    custom_instructions: String,
 ) -> Result<(), String> {
     let path = {
         let mut s = state.settings.lock().unwrap();
         s.groq_api_key = groq_api_key.clone();
         s.python_cmd   = python_cmd.clone();
         s.language     = language.clone();
+        s.postprocess_model = postprocess_model.clone();
+        s.custom_vocabulary = custom_vocabulary.clone();
+        s.custom_instructions = custom_instructions.clone();
         state.settings_path.clone()
     };
     let json = serde_json::json!({
         "groqApiKey": groq_api_key,
         "pythonCmd":  python_cmd,
         "language":   language,
+        "postprocessModel": postprocess_model,
         "outputMode": state.settings.lock().unwrap().output_mode,
+        "customVocabulary": custom_vocabulary,
+        "customInstructions": custom_instructions,
     });
     std::fs::write(&path, json.to_string()).map_err(|e| e.to_string())?;
     Ok(())
@@ -253,6 +341,9 @@ async fn get_settings(state: tauri::State<'_, AppState>) -> Result<serde_json::V
         "groqApiKey": s.groq_api_key,
         "pythonCmd": s.python_cmd,
         "language": s.language,
+        "postprocessModel": s.postprocess_model,
+        "customVocabulary": s.custom_vocabulary,
+        "customInstructions": s.custom_instructions,
     }))
 }
 
@@ -283,7 +374,7 @@ fn get_output_mode(state: tauri::State<'_, AppState>) -> String {
 
 #[tauri::command]
 fn set_output_mode(state: tauri::State<'_, AppState>, mode: String) -> Result<(), String> {
-    if ["prose", "email", "code"].contains(&mode.as_str()) {
+    if ["prose", "email", "code", "auto"].contains(&mode.as_str()) {
         state.settings.lock().unwrap().output_mode = mode.clone();
         // Persist
         let s = state.settings.lock().unwrap().clone();
@@ -332,6 +423,8 @@ pub fn run() {
         postprocess_model: "llama-3.1-8b-instant".to_string(),
         output_mode: "prose".to_string(),
         language: "auto".to_string(),
+        custom_vocabulary: "".to_string(),
+        custom_instructions: "".to_string(),
     }));
 
     tauri::Builder::default()
@@ -355,7 +448,10 @@ pub fn run() {
                     if let Some(v) = json["groqApiKey"].as_str() { s.groq_api_key = v.to_string(); }
                     if let Some(v) = json["pythonCmd"].as_str()  { s.python_cmd   = v.to_string(); }
                     if let Some(v) = json["language"].as_str()   { s.language     = v.to_string(); }
+                    if let Some(v) = json["postprocessModel"].as_str() { s.postprocess_model = v.to_string(); }
                     if let Some(v) = json["outputMode"].as_str() { s.output_mode  = v.to_string(); }
+                    if let Some(v) = json["customVocabulary"].as_str() { s.custom_vocabulary = v.to_string(); }
+                    if let Some(v) = json["customInstructions"].as_str() { s.custom_instructions = v.to_string(); }
                 }
             }
 
@@ -365,6 +461,8 @@ pub fn run() {
 
             let ollama_process: Arc<Mutex<Option<std::process::Child>>> =
                 Arc::new(Mutex::new(None));
+            let whisper_process: Arc<Mutex<Option<std::process::Child>>> =
+                Arc::new(Mutex::new(None));
 
             app.manage(AppState {
                 settings: settings.clone(),
@@ -372,6 +470,34 @@ pub fn run() {
                 hotkey_tx: cmd_tx,
                 settings_path: settings_file.clone(),
                 ollama_process: ollama_process.clone(),
+                whisper_process: whisper_process.clone(),
+            });
+
+            // Start the persistent Whisper transcription server
+            let whisper_server_path = std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|d| d.join("sidecar").join("whisper_server.py")))
+                .unwrap_or_else(|| std::path::PathBuf::from("sidecar/whisper_server.py"));
+
+            let python_cmd_clone = settings.lock().unwrap().python_cmd.clone();
+            let whisper_process_clone = whisper_process.clone();
+
+            std::thread::spawn(move || {
+                eprintln!("[whisper_server] spawning persistent server: {} {}", python_cmd_clone, whisper_server_path.display());
+                match std::process::Command::new(&python_cmd_clone)
+                    .arg(&whisper_server_path)
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn()
+                {
+                    Ok(child) => {
+                        *whisper_process_clone.lock().unwrap() = Some(child);
+                        eprintln!("[whisper_server] server spawned successfully.");
+                    }
+                    Err(e) => {
+                        eprintln!("[whisper_server] failed to spawn server: {e}");
+                    }
+                }
             });
 
             #[cfg(target_os = "linux")]
@@ -414,6 +540,11 @@ pub fn run() {
                     "quit" => {
                         if let Some(state) = app.try_state::<AppState>() {
                             if let Ok(mut guard) = state.ollama_process.lock() {
+                                if let Some(child) = guard.as_mut() {
+                                    child.kill().ok();
+                                }
+                            }
+                            if let Ok(mut guard) = state.whisper_process.lock() {
                                 if let Some(child) = guard.as_mut() {
                                     child.kill().ok();
                                 }

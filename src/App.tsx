@@ -41,6 +41,9 @@ interface Settings {
   groqApiKey: string;
   pythonCmd: string;
   language: string;
+  postprocessModel?: string;
+  customVocabulary?: string;
+  customInstructions?: string;
 }
 
 const BAR_COUNT = 36;
@@ -292,9 +295,9 @@ export default function App() {
   const [status, setStatus]         = useState<Status>("idle");
   const [statusMsg, setStatusMsg]   = useState("");
   const [transcripts, setTranscripts] = useState<TranscriptEntry[]>([]);
-  const [settings, setSettings]     = useState<Settings>({ groqApiKey: "", pythonCmd: "python", language: "auto" });
+  const [settings, setSettings]     = useState<Settings>({ groqApiKey: "", pythonCmd: "python", language: "auto", postprocessModel: "llama-3.1-8b-instant", customVocabulary: "", customInstructions: "" });
   const [saved, setSaved]           = useState(false);
-  const [outputMode, setOutputMode] = useState<"prose" | "email" | "code">("prose");
+  const [outputMode, setOutputMode] = useState<"prose" | "email" | "code" | "auto">("prose");
   const [activeNav, setActiveNav]   = useState("home");
   const [copiedKey, setCopiedKey]   = useState<string | null>(null);
   const [lightMode, setLightMode]   = useState(false);
@@ -339,7 +342,7 @@ export default function App() {
             setTranscripts(entries);
           } else {
             setTranscripts([]);
-            setSettings({ groqApiKey: "", pythonCmd: "python", language: "auto" });
+            setSettings({ groqApiKey: "", pythonCmd: "python", language: "auto", postprocessModel: "llama-3.1-8b-instant", customVocabulary: "", customInstructions: "" });
           }
         } catch (err) {
           console.error("Auth change handler failed:", err);
@@ -370,7 +373,7 @@ export default function App() {
 
   useEffect(() => {
     invoke<string>("get_output_mode")
-      .then((m) => setOutputMode(m as "prose" | "email" | "code"))
+      .then((m) => setOutputMode(m as "prose" | "email" | "code" | "auto"))
       .catch(console.error);
   }, []);
 
@@ -379,6 +382,9 @@ export default function App() {
       groqApiKey: settings.groqApiKey,
       pythonCmd:  settings.pythonCmd,
       language:   settings.language,
+      postprocessModel: settings.postprocessModel ?? "llama-3.1-8b-instant",
+      customVocabulary: settings.customVocabulary ?? "",
+      customInstructions: settings.customInstructions ?? "",
     });
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
@@ -528,6 +534,17 @@ export default function App() {
                   <span className="field-hint">Fast cloud transcription via Groq Whisper</span>
                 </div>
                 <div className="field-group">
+                  <label className="field-label">Postprocessing Model</label>
+                  <input
+                    type="text"
+                    className="field-input"
+                    value={settings.postprocessModel ?? "llama-3.1-8b-instant"}
+                    onChange={(e) => setSettings((s) => ({ ...s, postprocessModel: e.target.value }))}
+                    placeholder="llama-3.1-8b-instant"
+                  />
+                  <span className="field-hint">Cloud Groq LLM model or Local Ollama model ID used for speech correction</span>
+                </div>
+                <div className="field-group">
                   <label className="field-label" htmlFor="lang-select">Transcription Language</label>
                   <select
                     id="lang-select"
@@ -547,7 +564,7 @@ export default function App() {
                 <div className="field-group">
                   <label className="field-label">Polish style</label>
                   <div className="mode-selector">
-                    {(["prose", "email", "code"] as const).map((m) => (
+                    {(["prose", "email", "code", "auto"] as const).map((m) => (
                       <button
                         key={m}
                         className={`mode-btn${outputMode === m ? " mode-btn--active" : ""}`}
@@ -575,6 +592,32 @@ export default function App() {
                     placeholder="python"
                   />
                   <span className="field-hint">Used when Groq key is absent or fails</span>
+                </div>
+              </div>
+              <div className="settings-section">
+                <p className="settings-section-title">Accuracy & Formatting Tuning</p>
+                <div className="field-group">
+                  <label className="field-label">Custom Vocabulary</label>
+                  <input
+                    type="text"
+                    className="field-input"
+                    value={settings.customVocabulary ?? ""}
+                    onChange={(e) => setSettings((s) => ({ ...s, customVocabulary: e.target.value }))}
+                    placeholder="Tauri, SQLite, Rust, Groq, Shreyas"
+                  />
+                  <span className="field-hint">Comma-separated list of jargon or proper nouns to guide spelling accuracy</span>
+                </div>
+                <div className="field-group">
+                  <label className="field-label">Custom Formatting Instructions</label>
+                  <textarea
+                    className="field-input"
+                    value={settings.customInstructions ?? ""}
+                    onChange={(e) => setSettings((s) => ({ ...s, customInstructions: e.target.value }))}
+                    placeholder="e.g. Always format headings in bold. Use British English spellings."
+                    rows={3}
+                    style={{ resize: "vertical", height: "auto" }}
+                  />
+                  <span className="field-hint">Instructions for LLM formatting (e.g. British English, specific markdown structures)</span>
                 </div>
               </div>
               <button className="save-btn" onClick={saveSettings}>
