@@ -170,8 +170,25 @@ if [[ "$SESSION" == "wayland" ]]; then
         fi
     else
         ok "ydotool is available."
-        warn "To enable ydotool, start the daemon: sudo ydotoold &"
-        warn "Or add it to your systemd user services for auto-start."
+        log "Installing ydotoold as a systemd user service (auto-starts with login)..."
+        UNIT_DIR="$HOME/.config/systemd/user"
+        mkdir -p "$UNIT_DIR"
+        cat > "$UNIT_DIR/ydotoold.service" << 'UNIT'
+[Unit]
+Description=ydotool input daemon
+After=graphical-session.target
+
+[Service]
+ExecStart=/usr/bin/ydotoold --socket-path /tmp/.ydotool_socket
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=graphical-session.target
+UNIT
+        systemctl --user daemon-reload
+        systemctl --user enable --now ydotoold && ok "ydotoold service enabled and started." || \
+            warn "Could not start ydotoold service. Run: systemctl --user enable --now ydotoold"
     fi
 fi
 
