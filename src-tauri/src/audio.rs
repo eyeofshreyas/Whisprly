@@ -147,7 +147,7 @@ pub fn normalize_audio(samples: &mut [f32]) {
             max_peak = abs;
         }
     }
-    if max_peak > 0.01 && max_peak < 0.8 {
+    if max_peak > 0.01 {
         let multiplier = 0.8 / max_peak;
         for s in samples.iter_mut() {
             *s *= multiplier;
