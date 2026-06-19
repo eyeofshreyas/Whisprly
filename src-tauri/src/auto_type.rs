@@ -76,42 +76,35 @@ fn try_enigo(text: &str) -> bool {
 
 #[cfg(target_os = "linux")]
 fn try_ydotool(text: &str) -> bool {
-    // Type word-by-word with a short pause between words for a typewriter feel.
-    // split_inclusive keeps the trailing space with each word: "hello " "world"
-    let words: Vec<&str> = text.split_inclusive(' ').collect();
-    let total = words.len();
+    // Single ydotool invocation for the entire text.
+    // Per-word spawning caused ydotoold to interleave events from concurrent
+    // client connections, producing garbled character-level output.
+    // One process = one ordered event stream into ydotoold.
+    let result = std::process::Command::new("ydotool")
+        .env("YDOTOOL_SOCKET", "/tmp/.ydotool_socket")
+        .args(["type", "--key-delay", "8", "--key-hold", "8", "--", text])
+        .output();
 
-    for (i, word) in words.iter().enumerate() {
-        let result = std::process::Command::new("ydotool")
-            .env("YDOTOOL_SOCKET", "/tmp/.ydotool_socket")
-            .args(["type", "--", word])
-            .output();
-
-        match result {
-            Ok(o) if o.status.success() => {
-                // Pause between words (skip delay after the last word)
-                if i < total - 1 {
-                    std::thread::sleep(std::time::Duration::from_millis(55));
-                }
-            }
-            Ok(o) => {
-                let stderr = String::from_utf8_lossy(&o.stderr);
-                let stdout = String::from_utf8_lossy(&o.stdout);
-                eprintln!(
-                    "[wisperflow] ydotool failed (exit={:?}): stderr={:?} stdout={:?}\n\
-                     → Is ydotoold running? Try: sudo systemctl start ydotoold",
-                    o.status.code(), stderr.trim(), stdout.trim()
-                );
-                return false;
-            }
-            Err(e) => { eprintln!("[wisperflow] ydotool not found: {e}"); return false; }
+    match result {
+        Ok(o) if o.status.success() => {
+            // ydotoold may still be draining its uinput queue after ydotool exits.
+            // Give it time proportional to text length before the next action.
+            let drain_ms = (text.chars().count() as u64 * 5).max(150);
+            std::thread::sleep(std::time::Duration::from_millis(drain_ms));
+            true
         }
+        Ok(o) => {
+            let stderr = String::from_utf8_lossy(&o.stderr);
+            let stdout = String::from_utf8_lossy(&o.stdout);
+            eprintln!(
+                "[wisperflow] ydotool failed (exit={:?}): stderr={:?} stdout={:?}\n\
+                 → Is ydotoold running? Try: systemctl --user start ydotoold",
+                o.status.code(), stderr.trim(), stdout.trim()
+            );
+            false
+        }
+        Err(e) => { eprintln!("[wisperflow] ydotool not found: {e}"); false }
     }
-    // Drain: uinput events are queued in the kernel even after ydotool exits.
-    // Without this sleep, the next transcription's typing starts before the OS
-    // delivers the last batch, interleaving two streams character by character.
-    std::thread::sleep(std::time::Duration::from_millis(200));
-    true
 }
 
 #[cfg(target_os = "linux")]
