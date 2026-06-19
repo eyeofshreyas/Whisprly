@@ -42,7 +42,8 @@ export default function Overlay() {
     <div
       className={`ov-root ov-root--${status}`}
       onClick={handleClick}
-      title={status === "recording" ? "Click to stop" : undefined}
+      data-tauri-drag-region
+      title={status === "recording" ? "Click to stop • Drag to reposition" : "Drag to reposition"}
     >
       <Waveform status={status} />
     </div>

@@ -310,6 +310,64 @@ export default function App() {
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState("");
 
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [newTag, setNewTag] = useState("");
+
+  const updateVocabulary = useCallback((vocabStr: string) => {
+    setSettings((s) => {
+      const updated = { ...s, customVocabulary: vocabStr };
+      invoke("save_settings", {
+        groqApiKey: updated.groqApiKey,
+        pythonCmd:  updated.pythonCmd,
+        language:   updated.language,
+        postprocessModel: updated.postprocessModel ?? "llama-3.1-8b-instant",
+        customVocabulary: updated.customVocabulary ?? "",
+        customInstructions: updated.customInstructions ?? "",
+      }).catch(console.error);
+      return updated;
+    });
+  }, []);
+
+  const handleAddTag = useCallback(() => {
+    if (!newTag.trim()) return;
+    const cleanTag = newTag.trim();
+    const vocab = settings?.customVocabulary || "";
+    const tags = vocab.split(",").map(t => t.trim()).filter(Boolean);
+    if (!tags.some(t => t.toLowerCase() === cleanTag.toLowerCase())) {
+      const updatedTags = [...tags, cleanTag];
+      updateVocabulary(updatedTags.join(", "));
+    }
+    setNewTag("");
+  }, [newTag, settings?.customVocabulary, updateVocabulary]);
+
+  const handleDeleteTag = useCallback((tagToDelete: string) => {
+    const vocab = settings?.customVocabulary || "";
+    const tags = vocab.split(",").map(t => t.trim()).filter(Boolean);
+    const updatedTags = tags.filter(t => t !== tagToDelete);
+    updateVocabulary(updatedTags.join(", "));
+  }, [settings?.customVocabulary, updateVocabulary]);
+
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval> | null = null;
+    if (status === "recording") {
+      setRecordingSeconds(0);
+      interval = setInterval(() => {
+        setRecordingSeconds((s) => s + 1);
+      }, 1000);
+    } else {
+      setRecordingSeconds(0);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [status]);
+
+  const formatRecordingTime = (sec: number) => {
+    const m = Math.floor(sec / 60).toString().padStart(2, '0');
+    const s = (sec % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+  };
+
   useEffect(() => {
     const unStatus = listen<StatusPayload>("status", (e) => {
       setStatus(e.payload.status);
@@ -747,115 +805,247 @@ export default function App() {
               <p className="subtitle">Hold <kbd>Ctrl</kbd> + <kbd>Win</kbd> to dictate</p>
             </div>
 
-            {/* Stats */}
-            <div className="stats-row">
-              <div className="stat-card">
-                <span className="stat-value stat-value--cyan">{days}</span>
-                <span className="stat-label">{days === 1 ? "day" : "days"} active</span>
-              </div>
-              <div className="stat-card">
-                <span className="stat-value stat-value--green">{formatWords(words)}</span>
-                <span className="stat-label">words dictated</span>
-              </div>
-              <div className="stat-card">
-                <span className={`status-ring status-ring--${status}`} />
-                <span className="stat-label stat-status">
-                  {statusMsg || (status === "idle" ? "Ready" : status === "recording" ? "Recording…" : "Transcribing…")}
-                </span>
-              </div>
-            </div>
-
-            {/* Waveform pill */}
-            {status !== "idle" && (
-              <div className={`wave-pill wave-pill--${status}`}>
-                <MiniWaveform status={status} />
-                <span className="wave-pill-label">
-                  {status === "recording" ? "Listening…" : "Transcribing…"}
-                </span>
-              </div>
-            )}
-
-            {/* Transcript feed */}
-            <div className="feed">
-              <input
-                className="search-input"
-                type="search"
-                placeholder="Search transcripts…"
-                value={searchQuery}
-                onChange={(e) => handleSearch(e.target.value)}
-              />
-              {displayList.length > 0 && searchResults === null && (
-                <div className="feed-header">
-                  <button className="clear-all-btn" onClick={clearAll}>Clear all</button>
+            {/* Bento Grid Layout */}
+            <div className="bento-grid">
+              
+              {/* Column 1: History Feed Card */}
+              <section className="bento-card bento-feed-card">
+                <div className="card-header">
+                  <h2 className="card-title">
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="2" y="2" width="12" height="12" rx="1.5" />
+                      <line x1="5" y1="6" x2="11" y2="6" />
+                      <line x1="5" y1="9" x2="11" y2="9" />
+                    </svg>
+                    Transcription Feed
+                  </h2>
                 </div>
-              )}
-              {displayList.length === 0 ? (
-                searchResults !== null ? (
-                  <div className="empty">
-                    <p className="empty-title">No results</p>
-                    <p className="empty-sub">Try a different search term</p>
+
+                <input
+                  className="search-input"
+                  type="search"
+                  placeholder="Search transcripts…"
+                  value={searchQuery}
+                  onChange={(e) => handleSearch(e.target.value)}
+                  style={{ marginBottom: "12px" }}
+                />
+
+                {displayList.length > 0 && searchResults === null && (
+                  <div className="feed-header" style={{ padding: 0, marginBottom: "8px", border: "none" }}>
+                    <button className="clear-all-btn" onClick={clearAll}>Clear all</button>
                   </div>
-                ) : (
-                  <div className="empty">
-                    <div className="empty-icon">
-                      <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
-                        <rect x="9" y="2" width="6" height="12" rx="3" />
-                        <path d="M5 10a7 7 0 0 0 14 0" />
-                        <line x1="12" y1="19" x2="12" y2="22" />
-                        <line x1="8" y1="22" x2="16" y2="22" />
-                      </svg>
-                    </div>
-                    <p className="empty-title">No recordings yet</p>
-                    <p className="empty-sub">Press your hotkey and start speaking</p>
-                    <div className="empty-kbd-row">
-                      <kbd>Ctrl</kbd>
-                      <span className="empty-kbd-sep">+</span>
-                      <kbd>Win</kbd>
-                    </div>
-                  </div>
-                )
-              ) : (
-                Object.entries(groups).map(([date, entries]) => (
-                  <div key={date} className="date-group">
-                    <div className="date-label">{date}</div>
-                    {entries.map((t, i) => {
-                      const key    = `${t.timestamp}-${i}`;
-                      const copied = copiedKey === key;
-                      return (
-                        <div
-                          key={key}
-                          className={`entry${copied ? " entry--copied" : ""}`}
-                          style={{ "--entry-index": Math.min(i, 5) } as React.CSSProperties}
-                          onClick={() => copyEntry(t.text, key)}
-                          title="Click to copy"
-                        >
-                          <div className="entry-header">
-                            <div className="entry-time">{formatTime(t.timestamp)}</div>
-                            <div className="entry-actions">
-                              <span className={`entry-copy${copied ? " entry-copy--done" : ""}`} aria-hidden="true">
-                                {copied ? <IcCheck /> : <IcCopy />}
-                              </span>
-                              <span
-                                className="entry-delete"
-                                aria-label="Delete"
-                                onClick={e => { e.stopPropagation(); deleteEntry(t.id); }}
-                              >
-                                <IcTrash />
-                              </span>
-                            </div>
-                          </div>
-                          <p className="entry-text">{t.text}</p>
-                          {t.mode && (
-                            <div className="entry-footer">
-                              <span className="mode-badge">{t.mode}</span>
-                            </div>
-                          )}
+                )}
+
+                <div className="bento-feed-list">
+                  {displayList.length === 0 ? (
+                    searchResults !== null ? (
+                      <div className="empty">
+                        <p className="empty-title">No results</p>
+                        <p className="empty-sub">Try a different search term</p>
+                      </div>
+                    ) : (
+                      <div className="empty">
+                        <div className="empty-icon">
+                          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+                            <rect x="9" y="2" width="6" height="12" rx="3" />
+                            <path d="M5 10a7 7 0 0 0 14 0" />
+                            <line x1="12" y1="19" x2="12" y2="22" />
+                            <line x1="8" y1="22" x2="16" y2="22" />
+                          </svg>
                         </div>
-                      );
-                    })}
+                        <p className="empty-title">No recordings yet</p>
+                        <p className="empty-sub">Press your hotkey and start speaking</p>
+                        <div className="empty-kbd-row">
+                          <kbd>Ctrl</kbd>
+                          <span className="empty-kbd-sep">+</span>
+                          <kbd>Win</kbd>
+                        </div>
+                      </div>
+                    )
+                  ) : (
+                    Object.entries(groups).map(([date, entries]) => (
+                      <div key={date} className="date-group" style={{ animation: "none", padding: 0 }}>
+                        <div className="date-label">{date}</div>
+                        {entries.map((t, i) => {
+                          const key    = `${t.timestamp}-${i}`;
+                          const copied = copiedKey === key;
+                          return (
+                            <div
+                              key={key}
+                              className={`entry${copied ? " entry--copied" : ""}`}
+                              style={{ "--entry-index": Math.min(i, 5) } as React.CSSProperties}
+                              onClick={() => copyEntry(t.text, key)}
+                              title="Click to copy"
+                            >
+                              <div className="entry-header">
+                                <div className="entry-time">{formatTime(t.timestamp)}</div>
+                                <div className="entry-actions">
+                                  <span className={`entry-copy${copied ? " entry-copy--done" : ""}`} aria-hidden="true">
+                                    {copied ? <IcCheck /> : <IcCopy />}
+                                  </span>
+                                  <span
+                                    className="entry-delete"
+                                    aria-label="Delete"
+                                    onClick={e => { e.stopPropagation(); deleteEntry(t.id); }}
+                                  >
+                                    <IcTrash />
+                                  </span>
+                                </div>
+                              </div>
+                              <p className="entry-text">{t.text}</p>
+                              {t.mode && (
+                                <div className="entry-footer">
+                                  <span className="mode-badge">{t.mode}</span>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </section>
+
+              {/* Column 2: Active Recorder & Stats Column */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                
+                {/* Recorder Card */}
+                <section className="bento-card bento-recorder-card">
+                  <div className="bento-recorder-state">
+                    <span className={`bento-state-indicator bento-state-indicator--${status}`}>
+                      {status !== "idle" && <span className={`bento-recording-dot bento-recording-dot--${status}`} />}
+                      {status === "idle" ? "Ready" : status === "recording" ? "Recording Active" : "Transcribing…"}
+                    </span>
+                    <span style={{ fontSize: "10.5px", color: "var(--text-3)" }}>
+                      {status === "idle" ? "Shortcut: Ctrl + Win" : `Mode: ${outputMode.toUpperCase()}`}
+                    </span>
                   </div>
-                ))
-              )}
+
+                  <div className={`bento-waveform-container bento-waveform-container--${status}`}>
+                    {status === "idle" ? (
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "4px", color: "var(--text-3)", textAlign: "center" }}>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.5 }}>
+                          <rect x="9" y="2" width="6" height="12" rx="3" />
+                          <path d="M5 10a7 7 0 0 0 14 0" />
+                          <line x1="12" y1="19" x2="12" y2="22" />
+                        </svg>
+                        <span style={{ fontSize: "10px", fontWeight: 500 }}>Hold hotkey to record</span>
+                      </div>
+                    ) : (
+                      Array.from({ length: 16 }).map((_, i) => (
+                        <span key={i} className="bento-wave-bar" />
+                      ))
+                    )}
+                  </div>
+
+                  <div className="bento-recorder-stats">
+                    <span className="bento-timer">
+                      {status === "recording" ? formatRecordingTime(recordingSeconds) : status === "transcribing" ? "..." : "00:00"}
+                    </span>
+                    <div className="bento-controls">
+                      {status !== "idle" && (
+                        <button className="bento-control-btn bento-control-btn--primary" onClick={() => invoke("stop_recording").catch(() => {})}>
+                          Done
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </section>
+
+                {/* Stats Row */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+                  <div className="stat-card" style={{ margin: 0, padding: "14px 16px" }}>
+                    <span className="stat-value" style={{ color: "var(--accent)" }}>{days} days</span>
+                    <span className="stat-label">Active Streak 🔥</span>
+                  </div>
+                  <div className="stat-card" style={{ margin: 0, padding: "14px 16px" }}>
+                    <span className="stat-value" style={{ color: "var(--green)" }}>{formatWords(words)}</span>
+                    <span className="stat-label">Words Dictated ✍️</span>
+                  </div>
+                </div>
+
+              </div>
+
+              {/* Column 3: Custom Vocab & Style Presets */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                
+                {/* Vocabulary Cloud */}
+                <section className="bento-card">
+                  <div className="card-header">
+                    <h2 className="card-title">
+                      <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8">
+                        <path d="M3 3A1.5 1.5 0 0 1 4.5 1.5H13.5v12H4.5A1.5 1.5 0 0 1 3 12V3z" />
+                        <path d="M3 12A1.5 1.5 0 0 0 4.5 13.5H13.5" />
+                        <line x1="6.5" y1="5" x2="10.5" y2="5" />
+                      </svg>
+                      Vocabulary
+                    </h2>
+                  </div>
+
+                  <div className="vocab-tags-container">
+                    {(settings.customVocabulary
+                      ? settings.customVocabulary.split(",").map(t => t.trim()).filter(Boolean)
+                      : []
+                    ).map(tag => (
+                      <span key={tag} className="tag">
+                        {tag}
+                        <button className="tag-delete" onClick={() => handleDeleteTag(tag)}>✕</button>
+                      </span>
+                    ))}
+                  </div>
+
+                  <div className="tag-input-wrapper">
+                    <input
+                      type="text"
+                      className="tag-input"
+                      placeholder="Add proper noun..."
+                      value={newTag}
+                      onChange={e => setNewTag(e.target.value)}
+                      onKeyDown={e => { if (e.key === "Enter") handleAddTag(); }}
+                    />
+                    <button className="tag-add-btn" onClick={handleAddTag}>+</button>
+                  </div>
+                </section>
+
+                {/* Formatting Style Presets */}
+                <section className="bento-card">
+                  <div className="card-header">
+                    <h2 className="card-title">
+                      <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8">
+                        <path d="M8 1.5l1.7 3.5 3.8.55-2.75 2.65.65 3.8L8 10.3l-3.4 1.7.65-3.8L2.5 5.55l3.8-.55L8 1.5z" />
+                      </svg>
+                      Formatting Style
+                    </h2>
+                  </div>
+
+                  <div className="presets-list">
+                    {([
+                      { id: "auto", name: "Smart Auto", desc: "Format based on active app", icon: "🤖" },
+                      { id: "prose", name: "Clean Prose", desc: "Structured paragraphs", icon: "✍️" },
+                      { id: "email", name: "Email Formal", desc: "Add email layouts/greetings", icon: "✉️" },
+                      { id: "code", name: "Code / CLI", desc: "Raw CLI commands & snippets", icon: "💻" }
+                    ] as const).map(p => (
+                      <div
+                        key={p.id}
+                        className={`preset-card${outputMode === p.id ? " preset-card--active" : ""}`}
+                        onClick={() => {
+                          setOutputMode(p.id);
+                          invoke("set_output_mode", { mode: p.id }).catch(console.error);
+                        }}
+                      >
+                        <div className="preset-icon">{p.icon}</div>
+                        <div className="preset-info">
+                          <span className="preset-name">{p.name}</span>
+                          <span className="preset-desc">{p.desc}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+              </div>
+
             </div>
           </>
         )}

@@ -1,0 +1,1215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Whisprly - Redesign Interactive Prototype</title>
+  <!-- Google Fonts: Syne and Manrope -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700&family=Syne:wght@500;700;800&display=swap" rel="stylesheet">
+  
+  <style>
+    /* ── Design Tokens & CSS Variables ─────────────────────────────────── */
+    :root {
+      /* Dark Theme Tokens */
+      --bg-base: #0B0A0E;
+      --bg-surface: rgba(18, 16, 23, 0.7);
+      --bg-card: rgba(255, 255, 255, 0.035);
+      --bg-card-hover: rgba(255, 255, 255, 0.06);
+      --bg-glass: rgba(11, 10, 14, 0.85);
+      --border: rgba(255, 255, 255, 0.06);
+      --border-bright: rgba(255, 255, 255, 0.12);
+      
+      /* Glowing Accents */
+      --accent-orange: #E8803A;
+      --accent-orange-dim: rgba(232, 128, 58, 0.12);
+      --accent-green: #4EC586;
+      --accent-green-dim: rgba(78, 197, 134, 0.12);
+      --accent-violet: #C05E28;
+      
+      /* Status Colors */
+      --recording: #E05252;
+      --recording-glow: rgba(224, 82, 82, 0.2);
+      --ready: #4EC586;
+      
+      /* Text scale */
+      --text-0: #F4F1EC;
+      --text-1: rgba(244, 241, 236, 0.85);
+      --text-2: rgba(244, 241, 236, 0.55);
+      --text-3: rgba(244, 241, 236, 0.3);
+      --text-4: rgba(244, 241, 236, 0.12);
+      
+      /* Radii */
+      --radius-sm: 8px;
+      --radius-md: 12px;
+      --radius-lg: 18px;
+      --radius-pill: 999px;
+      
+      /* Font stacks */
+      --font-display: 'Syne', sans-serif;
+      --font-body: 'Manrope', sans-serif;
+      
+      /* Transitions */
+      --transition-spring: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+      --transition-fade: all 0.2s ease-out;
+      
+      --backdrop-blur: blur(20px);
+    }
+
+    /* Light Theme Overrides */
+    .light-mode {
+      --bg-base: #FAF8F4;
+      --bg-surface: rgba(255, 255, 255, 0.7);
+      --bg-card: rgba(0, 0, 0, 0.03);
+      --bg-card-hover: rgba(0, 0, 0, 0.055);
+      --bg-glass: rgba(250, 248, 244, 0.85);
+      --border: rgba(0, 0, 0, 0.07);
+      --border-bright: rgba(0, 0, 0, 0.14);
+      
+      --accent-orange: #C26022;
+      --accent-orange-dim: rgba(194, 96, 34, 0.08);
+      --accent-green: #2E9E60;
+      --accent-green-dim: rgba(46, 158, 96, 0.08);
+      --accent-violet: #9E4C18;
+      
+      --text-0: #1C1815;
+      --text-1: rgba(28, 24, 21, 0.85);
+      --text-2: rgba(28, 24, 21, 0.55);
+      --text-3: rgba(28, 24, 21, 0.35);
+      --text-4: rgba(28, 24, 21, 0.16);
+    }
+
+    /* ── Global Styles ─────────────────────────────────────────────────── */
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: var(--font-body);
+      background-color: var(--bg-base);
+      color: var(--text-0);
+      min-height: 100vh;
+      overflow-x: hidden;
+      display: flex;
+      transition: background-color 0.4s ease;
+      background-image: 
+        radial-gradient(ellipse at 50% -20%, var(--accent-orange-dim) 0%, transparent 60%),
+        radial-gradient(ellipse at 80% 80%, rgba(192, 94, 40, 0.03) 0%, transparent 50%);
+    }
+
+    /* ── Sidebar Layout ────────────────────────────────────────────────── */
+    .sidebar {
+      width: 230px;
+      background: var(--bg-surface);
+      border-right: 1px solid var(--border);
+      backdrop-filter: var(--backdrop-blur);
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 40px;
+    }
+
+    .brand-logo {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--accent-orange), var(--accent-violet));
+      box-shadow: 0 0 16px var(--accent-orange-dim);
+      position: relative;
+    }
+
+    .brand-logo::after {
+      content: '';
+      position: absolute;
+      width: 6px;
+      height: 6px;
+      background-color: var(--accent-green);
+      border-radius: 50%;
+      bottom: 0;
+      right: 0;
+      border: 1.5px solid var(--bg-base);
+    }
+
+    .brand-name {
+      font-family: var(--font-display);
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+
+    .nav-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      flex-grow: 1;
+    }
+
+    .nav-item button {
+      width: 100%;
+      background: none;
+      border: none;
+      color: var(--text-2);
+      font-family: var(--font-body);
+      font-size: 14px;
+      font-weight: 500;
+      padding: 10px 14px;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      text-align: left;
+      transition: var(--transition-fade);
+    }
+
+    .nav-item button:hover {
+      background: var(--bg-card);
+      color: var(--text-1);
+    }
+
+    .nav-item.active button {
+      background: var(--accent-orange-dim);
+      color: var(--accent-orange);
+      font-weight: 600;
+    }
+
+    .sidebar-footer {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      padding-top: 20px;
+      border-top: 1px solid var(--border);
+    }
+
+    .user-profile {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 4px;
+      border-radius: var(--radius-md);
+      cursor: pointer;
+    }
+
+    .avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: var(--border-bright);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 14px;
+      color: var(--accent-orange);
+    }
+
+    .user-details {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .user-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-1);
+    }
+
+    .user-role {
+      font-size: 11px;
+      color: var(--text-3);
+    }
+
+    /* ── Main Container ────────────────────────────────────────────────── */
+    .main-content {
+      flex-grow: 1;
+      padding: 32px 40px;
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+    }
+
+    /* ── Header ────────────────────────────────────────────────────────── */
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .header-greeting {
+      font-size: 14px;
+      color: var(--text-2);
+      margin-bottom: 4px;
+    }
+
+    .header-title {
+      font-family: var(--font-display);
+      font-size: 32px;
+      font-weight: 700;
+      letter-spacing: -0.8px;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .action-btn {
+      width: 38px;
+      height: 38px;
+      border-radius: 50%;
+      border: 1px solid var(--border);
+      background: var(--bg-surface);
+      color: var(--text-1);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: var(--transition-fade);
+      backdrop-filter: var(--backdrop-blur);
+    }
+
+    .action-btn:hover {
+      background: var(--bg-card-hover);
+      border-color: var(--border-bright);
+      transform: translateY(-1px);
+    }
+
+    /* ── Bento Grid ────────────────────────────────────────────────────── */
+    .bento-grid {
+      display: grid;
+      grid-template-columns: 360px 1fr 280px;
+      gap: 20px;
+      align-items: start;
+    }
+
+    .bento-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      backdrop-filter: var(--backdrop-blur);
+      padding: 22px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      transition: var(--transition-spring);
+    }
+
+    .bento-card:hover {
+      border-color: var(--border-bright);
+    }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 4px;
+    }
+
+    .card-title {
+      font-family: var(--font-display);
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: -0.2px;
+      color: var(--text-1);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* ── Left Column: Recordings History ────────────────────────────────── */
+    .search-box {
+      position: relative;
+    }
+
+    .search-input {
+      width: 100%;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 10px 14px 10px 36px;
+      color: var(--text-1);
+      font-family: var(--font-body);
+      font-size: 13px;
+      transition: var(--transition-fade);
+    }
+
+    .search-input:focus {
+      border-color: var(--accent-orange);
+      background: rgba(255, 255, 255, 0.01);
+    }
+
+    .search-icon {
+      position: absolute;
+      left: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-3);
+      pointer-events: none;
+    }
+
+    .history-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      max-height: 520px;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+
+    .history-list::-webkit-scrollbar {
+      width: 4px;
+    }
+    .history-list::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 2px;
+    }
+
+    .history-item {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 14px;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      transition: var(--transition-fade);
+      position: relative;
+    }
+
+    .history-item:hover {
+      background: var(--bg-card-hover);
+      transform: translateY(-1px);
+    }
+
+    .history-meta {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--text-3);
+    }
+
+    .history-body {
+      font-size: 13px;
+      color: var(--text-1);
+      line-height: 1.45;
+    }
+
+    .history-actions {
+      position: absolute;
+      right: 12px;
+      top: 12px;
+      display: flex;
+      gap: 6px;
+      opacity: 0;
+      transition: var(--transition-fade);
+    }
+
+    .history-item:hover .history-actions {
+      opacity: 1;
+    }
+
+    .item-action-btn {
+      background: var(--bg-glass);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      width: 24px;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-2);
+      cursor: pointer;
+      transition: var(--transition-fade);
+    }
+
+    .item-action-btn:hover {
+      color: var(--text-0);
+      background: var(--border-bright);
+    }
+
+    .badge {
+      align-self: flex-start;
+      font-size: 9px;
+      text-transform: uppercase;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: var(--accent-orange-dim);
+      color: var(--accent-orange);
+    }
+
+    /* ── Center Column: Recorder & Analytics ───────────────────────────── */
+    .recorder-card {
+      border: 1px solid var(--border-bright);
+      background: linear-gradient(to bottom, rgba(18, 16, 23, 0.8), rgba(11, 10, 14, 0.9));
+      position: relative;
+      overflow: hidden;
+    }
+
+    .recorder-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, var(--accent-orange), var(--accent-green));
+    }
+
+    .recorder-state {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .state-indicator {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--recording);
+    }
+
+    .recording-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: var(--recording);
+      box-shadow: 0 0 10px var(--recording);
+      animation: pulse 1.2s infinite ease-in-out;
+    }
+
+    .waveform-container {
+      height: 120px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      margin: 16px 0;
+    }
+
+    .wave-bar {
+      width: 3px;
+      height: 12px;
+      background: linear-gradient(to top, var(--accent-orange), var(--accent-green));
+      border-radius: var(--radius-pill);
+      animation: waveform-bounce 1s infinite alternate ease-in-out;
+      transform-origin: center;
+    }
+
+    /* Generate multiple wave delays & heights */
+    .wave-bar:nth-child(2n)  { animation-delay: 0.15s; height: 35px; }
+    .wave-bar:nth-child(3n)  { animation-delay: 0.3s;  height: 60px; }
+    .wave-bar:nth-child(4n)  { animation-delay: 0.45s; height: 18px; }
+    .wave-bar:nth-child(5n)  { animation-delay: 0.05s; height: 48px; }
+    .wave-bar:nth-child(6n)  { animation-delay: 0.25s; height: 75px; }
+    .wave-bar:nth-child(7n)  { animation-delay: 0.5s;  height: 25px; }
+    .wave-bar:nth-child(8n)  { animation-delay: 0.1s;  height: 52px; }
+    .wave-bar:nth-child(9n)  { animation-delay: 0.35s; height: 85px; }
+    .wave-bar:nth-child(10n) { animation-delay: 0.2s;  height: 40px; }
+
+    .recorder-stats {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-top: 1px solid var(--border);
+      padding-top: 18px;
+    }
+
+    .timer {
+      font-family: var(--font-display);
+      font-size: 26px;
+      font-weight: 700;
+      color: var(--text-0);
+      letter-spacing: -0.5px;
+    }
+
+    .controls-row {
+      display: flex;
+      gap: 10px;
+    }
+
+    .control-btn {
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--bg-card);
+      color: var(--text-1);
+      font-family: var(--font-body);
+      font-size: 13px;
+      font-weight: 600;
+      padding: 8px 16px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: var(--transition-fade);
+    }
+
+    .control-btn:hover {
+      background: var(--bg-card-hover);
+      border-color: var(--border-bright);
+    }
+
+    .control-btn.primary {
+      background: var(--accent-orange);
+      color: #FFF;
+      border: none;
+      box-shadow: 0 4px 14px rgba(232, 128, 58, 0.25);
+    }
+
+    .control-btn.primary:hover {
+      background: var(--accent-violet);
+      box-shadow: 0 4px 16px rgba(192, 94, 40, 0.35);
+      transform: translateY(-1px);
+    }
+
+    /* Analytics Bento Row */
+    .analytics-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .stat-mini-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .mini-card-val {
+      font-family: var(--font-display);
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+
+    .mini-card-val.orange { color: var(--accent-orange); }
+    .mini-card-val.green { color: var(--accent-green); }
+
+    .mini-card-label {
+      font-size: 12px;
+      color: var(--text-2);
+      font-weight: 500;
+    }
+
+    /* ── Right Column: Vocabulary & Style Presets ──────────────────────── */
+    .vocab-tags-container {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      min-height: 60px;
+      align-content: flex-start;
+      margin-bottom: 4px;
+    }
+
+    .tag {
+      background: var(--accent-orange-dim);
+      color: var(--accent-orange);
+      border: 1px solid rgba(232, 128, 58, 0.2);
+      border-radius: var(--radius-pill);
+      padding: 4px 10px 4px 12px;
+      font-size: 11px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      animation: scaleIn 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+
+    .tag-delete {
+      background: none;
+      border: none;
+      color: var(--accent-orange);
+      cursor: pointer;
+      font-size: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1px;
+      border-radius: 50%;
+      transition: var(--transition-fade);
+    }
+
+    .tag-delete:hover {
+      background: rgba(232, 128, 58, 0.2);
+    }
+
+    .tag-input-wrapper {
+      display: flex;
+      gap: 8px;
+    }
+
+    .tag-input {
+      flex-grow: 1;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 8px 12px;
+      color: var(--text-1);
+      font-family: var(--font-body);
+      font-size: 12px;
+      transition: var(--transition-fade);
+    }
+
+    .tag-input:focus {
+      border-color: var(--accent-orange);
+    }
+
+    .tag-add-btn {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      color: var(--text-1);
+      border-radius: var(--radius-sm);
+      padding: 0 12px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      transition: var(--transition-fade);
+    }
+
+    .tag-add-btn:hover {
+      background: var(--border-bright);
+    }
+
+    /* Style Presets */
+    .presets-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .preset-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 14px;
+      cursor: pointer;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      transition: var(--transition-spring);
+    }
+
+    .preset-card:hover {
+      background: var(--bg-card-hover);
+      border-color: var(--border-bright);
+    }
+
+    .preset-card.active {
+      border-color: var(--accent-green);
+      background: rgba(78, 197, 134, 0.05);
+      box-shadow: 0 0 14px rgba(78, 197, 134, 0.06);
+    }
+
+    .preset-icon {
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      background: var(--border);
+      color: var(--text-1);
+    }
+
+    .preset-card.active .preset-icon {
+      background: var(--accent-green-dim);
+      color: var(--accent-green);
+    }
+
+    .preset-info {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .preset-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-1);
+    }
+
+    .preset-desc {
+      font-size: 11px;
+      color: var(--text-3);
+      line-height: 1.35;
+    }
+
+    /* ── Keyframe Animations ───────────────────────────────────────────── */
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(0.85); }
+    }
+
+    @keyframes waveform-bounce {
+      from { transform: scaleY(0.15); opacity: 0.5; }
+      to { transform: scaleY(1.1); opacity: 1; }
+    }
+
+    @keyframes scaleIn {
+      from { transform: scale(0.9); opacity: 0; }
+      to { transform: scale(1); opacity: 1; }
+    }
+
+    /* Responsive Grid Toggles */
+    @media (max-width: 1100px) {
+      .bento-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ── SIDEBAR ── -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-logo"></div>
+      <span class="brand-name">Whisprly</span>
+    </div>
+
+    <ul class="nav-list">
+      <li class="nav-item active">
+        <button>
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M1.5 7L8 2l6.5 5V14.5H10.5V10H5.5v4.5H1.5V7z" />
+          </svg>
+          Home
+        </button>
+      </li>
+      <li class="nav-item">
+        <button>
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 3A1.5 1.5 0 0 1 4.5 1.5H13.5v12H4.5A1.5 1.5 0 0 1 3 12V3z" />
+            <path d="M3 12A1.5 1.5 0 0 0 4.5 13.5H13.5" />
+            <line x1="6.5" y1="5" x2="10.5" y2="5" />
+          </svg>
+          Dictionary
+        </button>
+      </li>
+      <li class="nav-item">
+        <button>
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="5.5,4.5 2,8 5.5,11.5" />
+            <polyline points="10.5,4.5 14,8 10.5,11.5" />
+            <line x1="9.5" y1="2" x2="6.5" y2="14" />
+          </svg>
+          Snippets
+        </button>
+      </li>
+      <li class="nav-item">
+        <button>
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="8" cy="8" r="2.5" />
+            <path d="M8 1.5v1.2M8 13.3v1.2M1.5 8h1.2M13.3 8h1.2" />
+          </svg>
+          Settings
+        </button>
+      </li>
+    </ul>
+
+    <div class="sidebar-footer">
+      <div class="user-profile">
+        <div class="avatar">S</div>
+        <div class="user-details">
+          <span class="user-name">Shreyas</span>
+          <span class="user-role">Pro Account</span>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ── MAIN PANEL ── -->
+  <main class="main-content">
+    
+    <!-- HEADER -->
+    <header class="header">
+      <div>
+        <p class="header-greeting" id="greeting">Good afternoon 👋</p>
+        <h1 class="header-title">Welcome back</h1>
+      </div>
+      <div class="header-actions">
+        <!-- Theme toggle button -->
+        <button class="action-btn" id="theme-toggle" title="Toggle Light/Dark Theme">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M13.5 10A6 6 0 0 1 6 2.5a6.5 6.5 0 1 0 7.5 7.5z" />
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- BENTO GRID -->
+    <div class="bento-grid">
+      
+      <!-- COLUMN 1: RECORDINGS FEED -->
+      <section class="bento-card">
+        <div class="card-header">
+          <h2 class="card-title">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="2.5" y="1.5" width="11" height="13" rx="1.5" />
+              <line x1="5.5" y1="5.5" x2="10.5" y2="5.5" />
+            </svg>
+            Transcription Feed
+          </h2>
+        </div>
+
+        <div class="search-box">
+          <svg class="search-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8">
+            <circle cx="7" cy="7" r="4.5" />
+            <line x1="10.5" y1="10.5" x2="14" y2="14" />
+          </svg>
+          <input type="search" class="search-input" id="search" placeholder="Search transcriptions...">
+        </div>
+
+        <div class="history-list" id="feed">
+          <div class="history-item">
+            <div class="history-meta">
+              <span>Today, 12:45 PM</span>
+              <span class="badge">Code</span>
+            </div>
+            <p class="history-body">git commit -m "Refactor audio coordinator workflow to execute a single-chunk continuous WAV file"</p>
+            <div class="history-actions">
+              <button class="item-action-btn" title="Copy to clipboard">📋</button>
+              <button class="item-action-btn delete-btn" title="Delete entry">✕</button>
+            </div>
+          </div>
+          
+          <div class="history-item">
+            <div class="history-meta">
+              <span>Yesterday, 4:10 PM</span>
+              <span class="badge">Email</span>
+            </div>
+            <p class="history-body">Hi team, I finished integrating the new Groq API keys and local sidecar fallbacks. Please test running local-whisper for on-device transcriptions and report any lag.</p>
+            <div class="history-actions">
+              <button class="item-action-btn" title="Copy to clipboard">📋</button>
+              <button class="item-action-btn delete-btn" title="Delete entry">✕</button>
+            </div>
+          </div>
+
+          <div class="history-item">
+            <div class="history-meta">
+              <span>June 18, 9:15 AM</span>
+              <span class="badge" style="background: rgba(78, 197, 134, 0.08); color: var(--accent-green)">Prose</span>
+            </div>
+            <p class="history-body">Whisprly leverages Tauri version two to deliver light, cross-platform speed combined with local fast-whisper execution.</p>
+            <div class="history-actions">
+              <button class="item-action-btn" title="Copy to clipboard">📋</button>
+              <button class="item-action-btn delete-btn" title="Delete entry">✕</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- COLUMN 2: ACTIVE RECORDER & ANALYTICS -->
+      <div style="display: flex; flex-direction: column; gap: 20px;">
+        
+        <!-- ACTIVE RECORDER CARD -->
+        <section class="bento-card recorder-card">
+          <div class="recorder-state">
+            <span class="state-indicator">
+              <span class="recording-dot"></span>
+              Recording Active
+            </span>
+            <span style="font-size: 11px; color: var(--text-3)">Mode: Auto-Detect</span>
+          </div>
+
+          <!-- WAVEFORM WIDGET -->
+          <div class="waveform-container">
+            <span class="wave-bar"></span>
+            <span class="wave-bar"></span>
+            <span class="wave-bar"></span>
+            <span class="wave-bar"></span>
+            <span class="wave-bar"></span>
+            <span class="wave-bar"></span>
+            <span class="wave-bar"></span>
+            <span class="wave-bar"></span>
+            <span class="wave-bar"></span>
+            <span class="wave-bar"></span>
+            <span class="wave-bar"></span>
+            <span class="wave-bar"></span>
+            <span class="wave-bar"></span>
+            <span class="wave-bar"></span>
+            <span class="wave-bar"></span>
+            <span class="wave-bar"></span>
+            <span class="wave-bar"></span>
+            <span class="wave-bar"></span>
+            <span class="wave-bar"></span>
+            <span class="wave-bar"></span>
+            <span class="wave-bar"></span>
+            <span class="wave-bar"></span>
+            <span class="wave-bar"></span>
+            <span class="wave-bar"></span>
+          </div>
+
+          <div class="recorder-stats">
+            <span class="timer" id="timer-val">00:14</span>
+            <div class="controls-row">
+              <button class="control-btn" id="pause-btn">Pause</button>
+              <button class="control-btn primary" id="stop-btn">Done</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- ANALYTICS MINI GRID -->
+        <div class="analytics-grid">
+          <div class="stat-mini-card">
+            <span class="mini-card-val orange">12 days</span>
+            <span class="mini-card-label">Active Streak 🔥</span>
+          </div>
+          <div class="stat-mini-card">
+            <span class="mini-card-val green">4.2k</span>
+            <span class="mini-card-label">Words Dictated ✍️</span>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- COLUMN 3: CUSTOM VOCAB & STYLE PRESETS -->
+      <div style="display: flex; flex-direction: column; gap: 20px;">
+        
+        <!-- VOCABULARY CARD -->
+        <section class="bento-card">
+          <div class="card-header">
+            <h2 class="card-title">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8">
+                <path d="M4 1.5H13.5v13H4A1.5 1.5 0 0 1 2.5 13V3A1.5 1.5 0 0 1 4 1.5z" />
+              </svg>
+              Vocabulary
+            </h2>
+          </div>
+
+          <div class="vocab-tags-container" id="tags-cloud">
+            <span class="tag">Tauri <button class="tag-delete">✕</button></span>
+            <span class="tag">Rust <button class="tag-delete">✕</button></span>
+            <span class="tag">Groq <button class="tag-delete">✕</button></span>
+            <span class="tag">SQLite <button class="tag-delete">✕</button></span>
+          </div>
+
+          <div class="tag-input-wrapper">
+            <input type="text" class="tag-input" id="vocab-input" placeholder="Add proper noun...">
+            <button class="tag-add-btn" id="add-tag-btn">+</button>
+          </div>
+        </section>
+
+        <!-- STYLE PRESETS CARD -->
+        <section class="bento-card">
+          <div class="card-header">
+            <h2 class="card-title">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8">
+                <path d="M8 1.5l1.7 3.5 3.8.55-2.75 2.65.65 3.8L8 10.3l-3.4 1.7.65-3.8L2.5 5.55l3.8-.55L8 1.5z" />
+              </svg>
+              Formatting Presets
+            </h2>
+          </div>
+
+          <div class="presets-list">
+            <div class="preset-card active" data-preset="auto">
+              <div class="preset-icon">🤖</div>
+              <div class="preset-info">
+                <span class="preset-name">Smart Auto</span>
+                <span class="preset-desc">Applies formatting based on active window title.</span>
+              </div>
+            </div>
+            
+            <div class="preset-card" data-preset="prose">
+              <div class="preset-icon">✍️</div>
+              <div class="preset-info">
+                <span class="preset-name">Clean Prose</span>
+                <span class="preset-desc">Punctated, structured paragraphs. Ideal for drafts.</span>
+              </div>
+            </div>
+
+            <div class="preset-card" data-preset="email">
+              <div class="preset-icon">✉️</div>
+              <div class="preset-info">
+                <span class="preset-name">Email Formal</span>
+                <span class="preset-desc">Creates email drafts with proper greeting and layout.</span>
+              </div>
+            </div>
+
+            <div class="preset-card" data-preset="code">
+              <div class="preset-icon">💻</div>
+              <div class="preset-info">
+                <span class="preset-name">Code / CLI</span>
+                <span class="preset-desc">Raw commands, filenames, code structures.</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </div>
+
+    </div>
+
+  </main>
+
+  <script>
+    // ── Theme Toggle Logic ──────────────────────────────────────────────
+    const themeBtn = document.getElementById('theme-toggle');
+    themeBtn.addEventListener('click', () => {
+      document.body.classList.toggle('light-mode');
+      const isLight = document.body.classList.contains('light-mode');
+      themeBtn.innerHTML = isLight 
+        ? `<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="8" cy="8" r="3.2"/>
+            <line x1="8" y1="1" x2="8" y2="2.5"/>
+            <line x1="8" y1="13.5" x2="8" y2="15"/>
+            <line x1="1" y1="8" x2="2.5" y2="8"/>
+            <line x1="13.5" y1="8" x2="15" y2="8"/>
+          </svg>`
+        : `<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M13.5 10A6 6 0 0 1 6 2.5a6.5 6.5 0 1 0 7.5 7.5z" />
+          </svg>`;
+    });
+
+    // ── Greeting Update ─────────────────────────────────────────────────
+    const hour = new Date().getHours();
+    const greetingEl = document.getElementById('greeting');
+    if (hour < 12) greetingEl.textContent = 'Good morning ☀️';
+    else if (hour < 17) greetingEl.textContent = 'Good afternoon 👋';
+    else greetingEl.textContent = 'Good evening 🌙';
+
+    // ── Interactive Vocabulary Tags ─────────────────────────────────────
+    const tagCloud = document.getElementById('tags-cloud');
+    const tagInput = document.getElementById('vocab-input');
+    const tagAddBtn = document.getElementById('add-tag-btn');
+
+    function createTag(text) {
+      if (!text.trim()) return;
+      const tag = document.createElement('span');
+      tag.className = 'tag';
+      tag.innerHTML = `${text.trim()} <button class="tag-delete">✕</button>`;
+      
+      // Delete listener
+      tag.querySelector('.tag-delete').addEventListener('click', () => {
+        tag.remove();
+      });
+      
+      tagCloud.appendChild(tag);
+      tagInput.value = '';
+    }
+
+    tagAddBtn.addEventListener('click', () => createTag(tagInput.value));
+    tagInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') createTag(tagInput.value);
+    });
+
+    // Setup initial delete actions for mock tags
+    document.querySelectorAll('.tag-delete').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.target.parentElement.remove();
+      });
+    });
+
+    // ── Style Preset Selector Cards ─────────────────────────────────────
+    const presetCards = document.querySelectorAll('.preset-card');
+    presetCards.forEach(card => {
+      card.addEventListener('click', () => {
+        presetCards.forEach(c => c.classList.remove('active'));
+        card.classList.add('active');
+      });
+    });
+
+    // ── History Feed Item Deletes & Copied Triggers ────────────────────
+    const feed = document.getElementById('feed');
+    feed.addEventListener('click', (e) => {
+      const item = e.target.closest('.history-item');
+      if (!item) return;
+
+      // Delete entry logic
+      if (e.target.classList.contains('delete-btn')) {
+        item.style.opacity = '0';
+        item.style.transform = 'scale(0.95)';
+        setTimeout(() => item.remove(), 200);
+        return;
+      }
+
+      // Copy text logic
+      const bodyText = item.querySelector('.history-body').textContent;
+      navigator.clipboard.writeText(bodyText).then(() => {
+        const copyBadge = e.target.closest('.item-action-btn');
+        if (copyBadge) {
+          const originalIcon = copyBadge.textContent;
+          copyBadge.textContent = '✓';
+          setTimeout(() => {
+            copyBadge.textContent = originalIcon;
+          }, 1200);
+        }
+      });
+    });
+
+    // ── Simulated Active Recording Timer ──────────────────────────────
+    let seconds = 14;
+    const timerVal = document.getElementById('timer-val');
+    const pauseBtn = document.getElementById('pause-btn');
+    const stopBtn = document.getElementById('stop-btn');
+    const recordingDot = document.querySelector('.recording-dot');
+    const waveBars = document.querySelectorAll('.wave-bar');
+    let timerInterval = setInterval(() => {
+      seconds++;
+      const mins = Math.floor(seconds / 60).toString().padStart(2, '0');
+      const secs = (seconds % 60).toString().padStart(2, '0');
+      timerVal.textContent = `${mins}:${secs}`;
+    }, 1000);
+
+    let isPaused = false;
+    pauseBtn.addEventListener('click', () => {
+      isPaused = !isPaused;
+      if (isPaused) {
+        clearInterval(timerInterval);
+        pauseBtn.textContent = 'Resume';
+        recordingDot.style.animationPlayState = 'paused';
+        recordingDot.style.backgroundColor = 'var(--text-3)';
+        recordingDot.style.boxShadow = 'none';
+        waveBars.forEach(bar => bar.style.animationPlayState = 'paused');
+        document.querySelector('.state-indicator').innerHTML = '<span class="recording-dot" style="animation-play-state: paused; background-color: var(--text-3); box-shadow: none"></span> Recording Paused';
+      } else {
+        pauseBtn.textContent = 'Pause';
+        recordingDot.style.animationPlayState = 'running';
+        recordingDot.style.backgroundColor = 'var(--recording)';
+        recordingDot.style.boxShadow = '0 0 10px var(--recording)';
+        waveBars.forEach(bar => bar.style.animationPlayState = 'running');
+        document.querySelector('.state-indicator').innerHTML = '<span class="recording-dot"></span> Recording Active';
+        timerInterval = setInterval(() => {
+          seconds++;
+          const mins = Math.floor(seconds / 60).toString().padStart(2, '0');
+          const secs = (seconds % 60).toString().padStart(2, '0');
+          timerVal.textContent = `${mins}:${secs}`;
+        }, 1000);
+      }
+    });
+
+    stopBtn.addEventListener('click', () => {
+      clearInterval(timerInterval);
+      alert('Mock recording completed! Transcription would start processing here.');
+      seconds = 0;
+      timerVal.textContent = '00:00';
+    });
+  </script>
+</body>
+</html>

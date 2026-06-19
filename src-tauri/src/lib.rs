@@ -75,18 +75,28 @@ fn emit_status(app: &AppHandle, status: &str, message: Option<String>) {
 
 fn show_overlay(app: &AppHandle) {
     if let Some(ov) = app.get_webview_window("overlay") {
-        if let Ok(Some(mon)) = ov.primary_monitor() {
-            let wa = mon.work_area();
-            let scale = mon.scale_factor();
-            let ow = (100.0 * scale) as i32;
-            let oh = (25.0 * scale) as i32;
-            let margin = (48.0 * scale) as i32;
-            let x = wa.position.x + (wa.size.width as i32 - ow) / 2;
-            let y = wa.position.y + wa.size.height as i32 - oh - margin;
-            let _ = ov.set_position(tauri::PhysicalPosition::new(x, y));
-        }
         let _ = ov.show();
         let _ = ov.set_always_on_top(true);
+        let ov_clone = ov.clone();
+        let main_win = app.get_webview_window("main");
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(350));
+            let ov_gui = ov_clone.clone();
+            let _ = ov_clone.run_on_main_thread(move || {
+                let mon_opt = main_win.as_ref()
+                    .and_then(|w| w.primary_monitor().ok().flatten())
+                    .or_else(|| ov_gui.primary_monitor().ok().flatten());
+                if let Some(mon) = mon_opt {
+                    let wa = mon.work_area();
+                    let scale = mon.scale_factor();
+                    let ow = (90.0 * scale) as i32;
+                    let margin = (8.0 * scale) as i32;
+                    let x = wa.position.x + (wa.size.width as i32 - ow) / 2;
+                    let y = wa.position.y + margin;
+                    let _ = ov_gui.set_position(tauri::PhysicalPosition::new(x, y));
+                }
+            });
+        });
     }
 }
 
@@ -401,6 +411,14 @@ fn delete_transcript(id: i64, state: tauri::State<'_, AppState>) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // #[cfg(target_os = "linux")]
+    // {
+    //     // Force GDK to use X11 so that window positioning and transparency rules work correctly on Wayland sessions
+    //     if std::env::var("GDK_BACKEND").is_err() {
+    //         std::env::set_var("GDK_BACKEND", "x11");
+    //     }
+    // }
+
     dotenvy::dotenv().ok();
 
     let groq_api_key = option_env!("GROQ_API")
