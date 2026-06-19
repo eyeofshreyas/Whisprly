@@ -47,9 +47,9 @@ fn system_prompt(mode: &str, custom_vocab: &str, custom_instructions: &str) -> S
          1. Fix punctuation: add commas, periods, question marks where natural speech would have them.\n\
          2. Remove filler words: um, uh, like, you know, so, basically, literally, right, actually.\n\
          3. Fix capitalization: sentence starts, proper nouns, acronyms.\n\
-         4. Fix phonetic speech-to-text errors, typos, and acoustic mishearings to match the contextually intended words (e.g., correct \"such raha\" to \"soch raha\", \"te re bari\" to \"tere baare\", \"bada\" or \"bud\" to \"but\" when used as a conjunction, \"shuk\" to \"show\", \"saatmai\" to \"saath mein\"). Do NOT rephrase, summarize, or change the sentence structure.\n\
-         5. Output ONLY the corrected text. Do NOT include the <<<RAW_TRANSCRIPT>>> delimiters in your output. Absolutely no preamble (e.g., \"Here is the corrected transcript:\"), no explanation, no quotes around the output, no commentary, and no notes explaining your actions (e.g., \"Note: I preserved...\"). Every character in your response must be part of the transcribed speech.\n\
-         6. HINGLISH PRESERVATION (CRITICAL): If the raw text contains Hinglish (Hindi words written in Latin/Roman script, e.g., \"ki\", \"saath\", \"mein\", \"karta\", \"hai\", \"is\", \"baat\", \"ke\", \"ko\", \"karate\", \"rahe\", \"thay\", etc.), you MUST preserve these Hinglish words as-is. Do NOT translate these words to English. Even if the sentence starts with or contains English words (e.g., \"I was thinking ki B.E. project saath mein karta hai is baat\"), you must NOT translate the Hinglish portion to English (e.g., do NOT change it to \"I was thinking that we should do our B.E. project together\"). Retain the exact combination of English and Roman-script Hindi words.\n\
+         4. Fix phonetic speech-to-text errors, typos, and acoustic mishearings to match the contextually intended words (e.g., correct \"such raha\" to \"soch raha\", \"te re bari\" to \"tere baare\", \"bada\" or \"bud\" to \"but\" when used as a conjunction, \"shuk\" to \"show\", \"saatmai\" to \"saath mein\", \"nai\" to \"nahi\", \"tuk\" to \"tak\"). Do NOT rephrase, summarize, or change the sentence structure. Do NOT formalize informal Hinglish words (e.g., keep \"nahi\" as \"nahi\", not \"nahin\").\n\
+         5. Output ONLY the corrected text. No preamble, no explanation, no \"Corrected to:\", no \"Here is:\", no quotes, no commentary, no notes. Every single character in your response must be part of the transcribed speech and nothing else.\n\
+         6. HINGLISH PRESERVATION — THIS IS ABSOLUTE: The user speaks Hinglish. If the transcript mixes Hindi and English (e.g., \"Kal mujhe important meeting hai\"), your output MUST also mix Hindi and English in exactly the same way. \"Kal\" stays \"Kal\". \"mujhe\" stays \"mujhe\". \"hai\" stays \"hai\". You are FORBIDDEN from translating any Hindi word to English. \"Kal\" must never become \"tomorrow\". \"mujhe\" must never become \"me\" or \"I\". \"hai\" must never become \"is\" or \"have\". The sentence structure, language mix, and every Hindi word must survive unchanged. If you output a fully-English sentence when the input was Hinglish, you have failed this task completely.\n\
          7. HINGLISH TRANSLITERATION (CRITICAL): If the raw text contains Devanagari/Hindi characters (any Hindi letters in Devanagari script, e.g. \"पर अंधेरों से डरता हूँ\"), you MUST transliterate them into Roman script Hinglish using the Latin alphabet (e.g. \"Par andheron se darta hoon\"). You must NOT output Devanagari characters in your response under any circumstances. Keep English words in English. Do NOT translate the meaning to English. For example, \"मैं ठीक हूँ, thank you\" becomes \"Main theek hoon, thank you\" (never output \"मैंठीक हूँ\"), \"भाई\" becomes \"Bhai\" (not \"Brother\"), and \"यार\" becomes \"Yaar\" (not \"friend\").\n\
          \n\
          {mode_rule}"
@@ -257,6 +257,17 @@ fn strip_llm_decorations(text: &str) -> String {
 
     let joined = lines.join("\n").trim().to_string();
     let mut result = joined;
+
+    // Handle mid-text "Corrected to:" marker — the LLM sometimes outputs
+    // both a translation attempt and then the "corrected" version after this marker.
+    // Take only the text after the marker when present.
+    let lower = result.to_lowercase();
+    if let Some(pos) = lower.find("\ncorrected to:\n") {
+        result = result[pos + "\ncorrected to:\n".len()..].trim().to_string();
+    } else if let Some(pos) = lower.find("corrected to:\n") {
+        result = result[pos + "corrected to:\n".len()..].trim().to_string();
+    }
+
     if result.starts_with('"') && result.ends_with('"') && result.len() > 1 {
         result.remove(0);
         result.pop();
