@@ -107,6 +107,10 @@ fn try_ydotool(text: &str) -> bool {
             Err(e) => { eprintln!("[wisperflow] ydotool not found: {e}"); return false; }
         }
     }
+    // Drain: uinput events are queued in the kernel even after ydotool exits.
+    // Without this sleep, the next transcription's typing starts before the OS
+    // delivers the last batch, interleaving two streams character by character.
+    std::thread::sleep(std::time::Duration::from_millis(200));
     true
 }
 
