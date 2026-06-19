@@ -17,16 +17,14 @@
     </linearGradient>
 
     <!-- Specular: cream highlight on lit upper surface of tube -->
-    <linearGradient id="wf-spec" x1="0" y1="0" x2="0" y2="1"
-                    gradientUnits="userSpaceOnUse" y1="30" y2="115">
+    <linearGradient id="wf-spec" gradientUnits="userSpaceOnUse" x1="0" y1="30" x2="0" y2="115">
       <stop offset="0%"   stop-color="#FFF4DC" stop-opacity="0.92"/>
       <stop offset="45%"  stop-color="#FFD89A" stop-opacity="0.18"/>
       <stop offset="100%" stop-color="#FFD89A" stop-opacity="0"/>
     </linearGradient>
 
     <!-- Chrome rim: sharp near-white glint at the very top edge -->
-    <linearGradient id="wf-chrome" x1="0" y1="0" x2="0" y2="1"
-                    gradientUnits="userSpaceOnUse" y1="28" y2="52">
+    <linearGradient id="wf-chrome" gradientUnits="userSpaceOnUse" x1="0" y1="28" x2="0" y2="52">
       <stop offset="0%"   stop-color="#FFFFFF" stop-opacity="0.88"/>
       <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
     </linearGradient>
