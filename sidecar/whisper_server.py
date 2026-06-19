@@ -1,84 +1,67 @@
 #!/usr/bin/env python3
 """
-Persistent Local Whisper Server using faster-whisper.
-Exposes a POST /transcribe endpoint on localhost:11435.
-Loads the Whisper model into memory once on startup.
+Persistent local Whisper transcription server.
+Loads faster-whisper 'small' model + Silero VAD once at startup.
+POST /transcribe  →  {"segments": [{"text": "...", "no_speech_prob": 0.02}]}
 """
-import json
 import os
 import sys
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from contextlib import asynccontextmanager
+from typing import Optional
+
+import uvicorn
+from fastapi import FastAPI, HTTPException
 from faster_whisper import WhisperModel
+from pydantic import BaseModel
 
-print("Initializing persistent faster-whisper model ('base')...", flush=True)
-try:
-    model = WhisperModel("base", device="cpu", compute_type="int8")
-    print("Whisper model loaded successfully.", flush=True)
-except Exception as e:
-    print(f"Error loading Whisper model: {e}", file=sys.stderr, flush=True)
-    sys.exit(1)
+_model: Optional[WhisperModel] = None
 
-class WhisperHTTPHandler(BaseHTTPRequestHandler):
-    def log_message(self, format, *args):
-        # Suppress default server logs on stdout/stderr to keep CLI neat
-        pass
 
-    def do_POST(self):
-        if self.path == "/transcribe":
-            try:
-                content_length = int(self.headers.get('Content-Length', 0))
-                if content_length == 0:
-                    self.send_response(400)
-                    self.end_headers()
-                    self.wfile.write(b"Empty request body")
-                    return
-
-                post_data = self.rfile.read(content_length)
-                req = json.loads(post_data.decode('utf-8'))
-
-                audio_file = req.get("file")
-                language = req.get("language")
-                prompt = req.get("prompt")
-
-                if not audio_file or not os.path.exists(audio_file):
-                    self.send_response(400)
-                    self.end_headers()
-                    self.wfile.write(b"Audio file not found")
-                    return
-
-                # Perform in-memory transcription
-                segments, _ = model.transcribe(
-                    audio_file,
-                    beam_size=5,
-                    language=language,
-                    initial_prompt=prompt
-                )
-                text = " ".join(seg.text.strip() for seg in segments)
-
-                self.send_response(200)
-                self.send_header('Content-Type', 'application/json')
-                self.end_headers()
-                response = json.dumps({"text": text})
-                self.wfile.write(response.encode('utf-8'))
-
-            except Exception as e:
-                self.send_response(500)
-                self.end_headers()
-                self.wfile.write(f"Server error: {e}".encode('utf-8'))
-        else:
-            self.send_response(404)
-            self.end_headers()
-
-def run_server():
-    port = 11435
-    server_address = ('127.0.0.1', port)
-    httpd = HTTPServer(server_address, WhisperHTTPHandler)
-    print(f"Transcription server running on http://127.0.0.1:{port}", flush=True)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global _model
+    print("[whisper_server] Loading 'small' model (first run may download ~145MB)...", flush=True)
     try:
-        httpd.serve_forever()
-    except KeyboardInterrupt:
-        pass
-    print("Shutting down transcription server...", flush=True)
+        _model = WhisperModel("small", device="cpu", compute_type="int8")
+        print("[whisper_server] Model ready.", flush=True)
+    except Exception as exc:
+        print(f"[whisper_server] Failed to load model: {exc}", file=sys.stderr, flush=True)
+        sys.exit(1)
+    yield
 
-if __name__ == '__main__':
-    run_server()
+
+app = FastAPI(lifespan=lifespan)
+
+
+class TranscribeRequest(BaseModel):
+    file: str
+    language: Optional[str] = None
+    prompt: Optional[str] = None
+
+
+@app.post("/transcribe")
+async def transcribe(req: TranscribeRequest):
+    if not os.path.exists(req.file):
+        raise HTTPException(status_code=400, detail=f"Audio file not found: {req.file}")
+
+    try:
+        segments_gen, _ = _model.transcribe(
+            req.file,
+            beam_size=5,
+            language=req.language or None,
+            initial_prompt=req.prompt or None,
+            vad_filter=True,
+            vad_parameters={"min_silence_duration_ms": 500},
+        )
+        segments = [
+            {"text": seg.text.strip(), "no_speech_prob": seg.no_speech_prob}
+            for seg in segments_gen
+            if seg.text.strip()
+        ]
+        return {"segments": segments}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="127.0.0.1", port=11435, log_level="error")
