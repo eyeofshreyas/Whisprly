@@ -160,15 +160,16 @@ async fn coordinator(
                     let final_prompt = {
                         let mut prompt_content = String::new();
                         let custom_vocab = s.custom_vocabulary.trim();
+                        // Whisper's prompt field expects natural text — do NOT label with "Vocabulary:"
+                        // because the model treats the prompt as preceding speech and echoes labels back.
                         if !custom_vocab.is_empty() {
-                            prompt_content.push_str("Vocabulary: ");
                             prompt_content.push_str(custom_vocab);
                             if s.language == "hi" || s.language == "auto" {
                                 prompt_content.push_str(", ki, saath, mein, karta, hai, is, baat, aap, kaise, hain, kar, raha, tha, project, phone, disturbance, o'clock");
                             }
                             prompt_content.push_str(". ");
                         } else if s.language == "hi" || s.language == "auto" {
-                            prompt_content.push_str("Vocabulary: ki, saath, mein, karta, hai, is, baat, aap, kaise, hain, kar, raha, tha, project, phone, disturbance, o'clock. ");
+                            prompt_content.push_str("ki, saath, mein, karta, hai, is, baat, aap, kaise, hain, kar, raha, tha, project, phone, disturbance, o'clock. ");
                         }
 
                         let last_tx = {

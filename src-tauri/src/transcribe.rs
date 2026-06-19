@@ -17,6 +17,9 @@ const HALLUCINATIONS: &[&str] = &[
     "...",
     "transcribe with correct punctuation",
     "voice dictation",
+    "vocabulary 2",
+    "vocabulary 1",
+    "vocabulary:",
 ];
 
 fn is_hallucination(text: &str) -> bool {
