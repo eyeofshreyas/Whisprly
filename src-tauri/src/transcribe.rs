@@ -33,6 +33,19 @@ pub fn language_param(language: &str) -> Option<String> {
     if t.is_empty() || t == "auto" { None } else { Some(t.to_string()) }
 }
 
+fn filter_segments(json: &serde_json::Value) -> Option<String> {
+    let segments = json["segments"].as_array()?;
+    let text: String = segments
+        .iter()
+        .filter(|seg| seg["no_speech_prob"].as_f64().unwrap_or(1.0) <= 0.6)
+        .filter_map(|seg| seg["text"].as_str())
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    if text.is_empty() { None } else { Some(text) }
+}
+
 pub async fn groq(
     wav_bytes: &[u8],
     api_key: &str,
@@ -50,7 +63,7 @@ pub async fn groq(
 
     let form = reqwest::multipart::Form::new()
         .text("model", "whisper-large-v3-turbo")
-        .text("response_format", "text")
+        .text("response_format", "verbose_json")
         .text("prompt", prompt_str)
         .part("file", file_part);
 
@@ -73,14 +86,19 @@ pub async fn groq(
         return Err(format!("Groq {status}: {body}"));
     }
 
-    let text = response.text().await.map_err(|e| e.to_string())?;
-    let trimmed = text.trim().to_string();
+    let json: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
 
-    if is_hallucination(&trimmed) {
+    // Primary path: filter segments by no_speech_prob
+    // Fallback: use top-level "text" if "segments" key is absent (unexpected response shape)
+    let text = filter_segments(&json)
+        .or_else(|| json["text"].as_str().map(|t| t.trim().to_string()))
+        .ok_or_else(|| "no_speech".to_string())?;
+
+    if is_hallucination(&text) {
         return Err("hallucination".into());
     }
 
-    Ok(trimmed)
+    Ok(text)
 }
 
 pub async fn local(
@@ -150,5 +168,57 @@ mod tests {
     fn empty_language_yields_none() {
         assert_eq!(language_param(""), None);
         assert_eq!(language_param("  "), None);
+    }
+
+    #[test]
+    fn filter_segments_keeps_low_no_speech_prob() {
+        let json = serde_json::json!({
+            "segments": [
+                {"text": "Hello world.", "no_speech_prob": 0.02},
+                {"text": "How are you?", "no_speech_prob": 0.04}
+            ]
+        });
+        assert_eq!(
+            filter_segments(&json),
+            Some("Hello world. How are you?".to_string())
+        );
+    }
+
+    #[test]
+    fn filter_segments_rejects_high_no_speech_prob() {
+        let json = serde_json::json!({
+            "segments": [
+                {"text": "Thank you for watching.", "no_speech_prob": 0.85},
+                {"text": "Please subscribe.", "no_speech_prob": 0.92}
+            ]
+        });
+        assert_eq!(filter_segments(&json), None);
+    }
+
+    #[test]
+    fn filter_segments_partial_filter() {
+        let json = serde_json::json!({
+            "segments": [
+                {"text": "Good segment.", "no_speech_prob": 0.1},
+                {"text": "Bad segment.", "no_speech_prob": 0.75}
+            ]
+        });
+        assert_eq!(
+            filter_segments(&json),
+            Some("Good segment.".to_string())
+        );
+    }
+
+    #[test]
+    fn filter_segments_returns_none_on_missing_key() {
+        // Groq fallback: no "segments" key → None → caller uses top-level "text"
+        let json = serde_json::json!({"text": "Hello world."});
+        assert_eq!(filter_segments(&json), None);
+    }
+
+    #[test]
+    fn filter_segments_returns_none_on_empty_array() {
+        let json = serde_json::json!({"segments": []});
+        assert_eq!(filter_segments(&json), None);
     }
 }
