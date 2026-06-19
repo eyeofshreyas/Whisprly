@@ -77,19 +77,30 @@ fn try_enigo(text: &str) -> bool {
 #[cfg(target_os = "linux")]
 fn try_ydotool(text: &str) -> bool {
     // Single ydotool invocation for the entire text.
-    // Per-word spawning caused ydotoold to interleave events from concurrent
-    // client connections, producing garbled character-level output.
-    // One process = one ordered event stream into ydotoold.
+    // Per-word spawning opened concurrent ydotoold connections whose events
+    // were interleaved, producing garbled character-level output.
+    //
+    // ydotool exits immediately after writing chars to the ydotoold socket.
+    // ydotoold processes them asynchronously at key-hold + key-delay ms/char.
+    // The drain sleep MUST cover that full duration or the next typing call
+    // overlaps with ydotoold's in-progress queue from the previous one.
+    const KEY_HOLD_MS: u64 = 5;
+    const KEY_DELAY_MS: u64 = 2;
+    const MS_PER_CHAR: u64 = KEY_HOLD_MS + KEY_DELAY_MS; // 7ms per char
+
     let result = std::process::Command::new("ydotool")
         .env("YDOTOOL_SOCKET", "/tmp/.ydotool_socket")
-        .args(["type", "--key-delay", "8", "--key-hold", "8", "--", text])
+        .args(["type",
+            "--key-hold",  "5",
+            "--key-delay", "2",
+            "--", text])
         .output();
 
     match result {
         Ok(o) if o.status.success() => {
-            // ydotoold may still be draining its uinput queue after ydotool exits.
-            // Give it time proportional to text length before the next action.
-            let drain_ms = (text.chars().count() as u64 * 5).max(150);
+            // Block for the full expected ydotoold injection time + 200ms safety.
+            let drain_ms = text.chars().count() as u64 * MS_PER_CHAR + 200;
+            eprintln!("[auto_type] ydotool drain: {}ms for {} chars", drain_ms, text.chars().count());
             std::thread::sleep(std::time::Duration::from_millis(drain_ms));
             true
         }
