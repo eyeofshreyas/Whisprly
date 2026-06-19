@@ -76,42 +76,47 @@ fn try_enigo(text: &str) -> bool {
 
 #[cfg(target_os = "linux")]
 fn try_ydotool(text: &str) -> bool {
-    // Single ydotool invocation for the entire text.
-    // Per-word spawning opened concurrent ydotoold connections whose events
-    // were interleaved, producing garbled character-level output.
-    //
-    // ydotool exits immediately after writing chars to the ydotoold socket.
-    // ydotoold processes them asynchronously at key-hold + key-delay ms/char.
-    // The drain sleep MUST cover that full duration or the next typing call
-    // overlaps with ydotoold's in-progress queue from the previous one.
-    const KEY_HOLD_MS: u64 = 5;
-    const KEY_DELAY_MS: u64 = 2;
-    const MS_PER_CHAR: u64 = KEY_HOLD_MS + KEY_DELAY_MS; // 7ms per char
+    use std::io::Write;
 
+    // Clipboard-paste strategy: wl-copy the text, then inject Ctrl+V via ydotool.
+    // Direct character injection (ydotool type) is unreliable — ydotoold processes
+    // events asynchronously and its queue persists across app restarts, causing
+    // garbled output when a previous session's events mix with new ones.
+    // One clipboard write + one key combo has no timing dependency on text length.
+
+    // 1. Copy to Wayland clipboard (blocking — wait for wl-copy to finish)
+    let mut child = match std::process::Command::new("wl-copy")
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(e) => { eprintln!("[wisperflow] wl-copy not found: {e}"); return false; }
+    };
+    if let Some(mut stdin) = child.stdin.take() {
+        if stdin.write_all(text.as_bytes()).is_err() { return false; }
+    }
+    if !child.wait().map(|s| s.success()).unwrap_or(false) {
+        eprintln!("[wisperflow] wl-copy failed");
+        return false;
+    }
+
+    // 2. Give the Wayland compositor time to register the new clipboard content
+    std::thread::sleep(std::time::Duration::from_millis(80));
+
+    // 3. Paste with Ctrl+V
     let result = std::process::Command::new("ydotool")
         .env("YDOTOOL_SOCKET", "/tmp/.ydotool_socket")
-        .args(["type",
-            "--key-hold",  "5",
-            "--key-delay", "2",
-            "--", text])
+        .args(["key", "ctrl+v"])
         .output();
 
     match result {
         Ok(o) if o.status.success() => {
-            // Block for the full expected ydotoold injection time + 200ms safety.
-            let drain_ms = text.chars().count() as u64 * MS_PER_CHAR + 200;
-            eprintln!("[auto_type] ydotool drain: {}ms for {} chars", drain_ms, text.chars().count());
-            std::thread::sleep(std::time::Duration::from_millis(drain_ms));
+            std::thread::sleep(std::time::Duration::from_millis(80));
             true
         }
         Ok(o) => {
-            let stderr = String::from_utf8_lossy(&o.stderr);
-            let stdout = String::from_utf8_lossy(&o.stdout);
-            eprintln!(
-                "[wisperflow] ydotool failed (exit={:?}): stderr={:?} stdout={:?}\n\
-                 → Is ydotoold running? Try: systemctl --user start ydotoold",
-                o.status.code(), stderr.trim(), stdout.trim()
-            );
+            eprintln!("[wisperflow] ydotool key ctrl+v failed: {:?}",
+                String::from_utf8_lossy(&o.stderr).trim());
             false
         }
         Err(e) => { eprintln!("[wisperflow] ydotool not found: {e}"); false }
