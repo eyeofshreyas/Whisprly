@@ -28,7 +28,22 @@ fn is_hallucination(text: &str) -> bool {
     if clean.is_empty() || clean.chars().all(|c| !c.is_alphanumeric()) {
         return true;
     }
-    HALLUCINATIONS.iter().any(|h| clean.contains(h))
+    if HALLUCINATIONS.iter().any(|h| clean.contains(h)) {
+        return true;
+    }
+    // Repeated-word hallucination: any alphabetic word (>1 char) appearing 4+ times in a row
+    let words: Vec<&str> = clean
+        .split(|c: char| !c.is_alphabetic())
+        .filter(|w| w.len() > 1)
+        .collect();
+    if words.len() >= 4 {
+        for window in words.windows(4) {
+            if window[0] == window[1] && window[1] == window[2] && window[2] == window[3] {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 pub fn language_param(language: &str) -> Option<String> {
@@ -67,6 +82,7 @@ pub async fn groq(
     let form = reqwest::multipart::Form::new()
         .text("model", "whisper-large-v3-turbo")
         .text("response_format", "verbose_json")
+        .text("temperature", "0")
         .text("prompt", prompt_str)
         .part("file", file_part);
 

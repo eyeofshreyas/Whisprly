@@ -156,38 +156,46 @@ async fn coordinator(
                     let language = transcribe::language_param(&s.language);
                     let wav = audio::to_wav_from_samples(combined_samples);
 
-                    // Fetch the last transcription as context for prompt chaining, combining it with custom vocabulary
+                    // Build Whisper initial_prompt: previous transcript context first (so the
+                    // model sees what was just said), then a natural-prose Hinglish seed block
+                    // (Whisper treats the prompt as preceding speech — word lists perform poorly),
+                    // then custom vocabulary terms. Total kept under 850 chars (~224 tokens).
                     let final_prompt = {
                         let mut prompt_content = String::new();
                         let custom_vocab = s.custom_vocabulary.trim();
-                        // Whisper's prompt field expects natural text — do NOT label with "Vocabulary:"
-                        // because the model treats the prompt as preceding speech and echoes labels back.
-                        if !custom_vocab.is_empty() {
-                            prompt_content.push_str(custom_vocab);
-                            if s.language == "hi" || s.language == "auto" {
-                                prompt_content.push_str(", ki, saath, mein, karta, hai, is, baat, aap, kaise, hain, kar, raha, tha, project, phone, disturbance, o'clock");
-                            }
-                            prompt_content.push_str(". ");
-                        } else if s.language == "hi" || s.language == "auto" {
-                            prompt_content.push_str("ki, saath, mein, karta, hai, is, baat, aap, kaise, hain, kar, raha, tha, project, phone, disturbance, o'clock. ");
-                        }
+                        let wants_hinglish = matches!(s.language.as_str(), "hi" | "auto" | "en");
 
+                        // 1. Previous transcript as conversational context (up to 600 chars)
                         let last_tx = {
                             let conn = db.lock().unwrap();
                             db::get_transcripts(&conn, 1)
                                 .ok()
                                 .and_then(|list| list.first().map(|entry| entry.text.clone()))
                         };
-
                         if let Some(prev) = last_tx {
-                            prompt_content.push_str(&prev);
+                            let prev_trimmed: String = prev.chars().take(600).collect();
+                            prompt_content.push_str(&prev_trimmed);
+                            prompt_content.push('\n');
                         }
 
-                        if prompt_content.is_empty() {
+                        // 2. Hinglish natural-prose seed with expanded vocabulary
+                        if wants_hinglish {
+                            prompt_content.push_str("The speaker uses Hinglish, mixing Hindi and English naturally. Common words: aap, mein, hain, karta, nahi, lekin, toh, bhi, tha, raha, kyunki, matlab, theek, haan, yaar, baat, kuch, woh, isko, usse, phir, abhi, agar, sirf, accha, bilkul, zaroor, bahut, kabhi, kaafi, sahi, seedha, seedhi, chalte, chalo, dekho, suno, lagta, lagti, rehna, rehte, karna, pata, samjha, mila, gaya, aaya, liya, diya, kiya, hua, hui, hue, sab, koi, kya, hai, ho.");
+                            if !custom_vocab.is_empty() {
+                                prompt_content.push(' ');
+                                prompt_content.push_str(custom_vocab);
+                                prompt_content.push('.');
+                            }
+                        } else if !custom_vocab.is_empty() {
+                            prompt_content.push_str(custom_vocab);
+                            prompt_content.push('.');
+                        }
+
+                        if prompt_content.trim().is_empty() {
                             None
                         } else {
-                            // Enforce Whisper prompt limit (approx 224 tokens)
-                            let char_limit = 1000;
+                            // Enforce Whisper prompt limit (~224 tokens ≈ 850 chars safe margin)
+                            let char_limit = 850;
                             let char_count = prompt_content.chars().count();
                             if char_count > char_limit {
                                 Some(prompt_content.chars().skip(char_count - char_limit).collect::<String>())
