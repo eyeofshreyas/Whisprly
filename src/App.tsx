@@ -29,6 +29,7 @@ interface TranscriptEntry {
   raw_text?: string;
   engine:    string;
   mode?:     string;
+  language?: string;
   timestamp: string;
 }
 
@@ -212,6 +213,31 @@ function IcMic() {
   );
 }
 
+function IcEdit() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+    </svg>
+  );
+}
+
+function IcType() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="4" width="20" height="16" rx="2" />
+      <line x1="6" y1="8" x2="6" y2="8" />
+      <line x1="10" y1="8" x2="10" y2="8" />
+      <line x1="14" y1="8" x2="14" y2="8" />
+      <line x1="18" y1="8" x2="18" y2="8" />
+      <line x1="6" y1="12" x2="6" y2="12" />
+      <line x1="18" y1="12" x2="18" y2="12" />
+      <line x1="7" y1="16" x2="17" y2="16" />
+      <line x1="10" y1="12" x2="14" y2="12" />
+    </svg>
+  );
+}
+
 function getGreeting(): string {
   const h = new Date().getHours();
   if (h < 12) return "Good morning ☀️";
@@ -309,9 +335,16 @@ export default function App() {
   const [setupProgress, setSetupProgress] = useState<SetupProgress | null>(null);
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState("");
+  const [toastType, setToastType] = useState<"success" | "info" | "error">("success");
 
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [newTag, setNewTag] = useState("");
+
+  const [accentColor, setAccentColor] = useState<string>(() => {
+    return localStorage.getItem("whisprly_accent_color") || "amber";
+  });
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingText, setEditingText] = useState("");
 
   const updateVocabulary = useCallback((vocabStr: string) => {
     setSettings((s) => {
@@ -368,6 +401,65 @@ export default function App() {
     return `${m}:${s}`;
   };
 
+  const triggerToast = useCallback((msg: string, type: "success" | "info" | "error" = "success") => {
+    setToastMessage(msg);
+    setToastType(type);
+    setShowToast(true);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setShowToast(false), 3000);
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem("whisprly_accent_color", accentColor);
+    const root = document.documentElement;
+    if (accentColor === "purple") {
+      root.style.setProperty("--accent", "#a855f7");
+      root.style.setProperty("--accent-glow", "rgba(168, 85, 247, 0.25)");
+      root.style.setProperty("--accent-dim", "rgba(168, 85, 247, 0.12)");
+      root.style.setProperty("--accent-dark", "#7e22ce");
+    } else if (accentColor === "blue") {
+      root.style.setProperty("--accent", "#3b82f6");
+      root.style.setProperty("--accent-glow", "rgba(59, 130, 246, 0.25)");
+      root.style.setProperty("--accent-dim", "rgba(59, 130, 246, 0.12)");
+      root.style.setProperty("--accent-dark", "#1d4ed8");
+    } else if (accentColor === "pink") {
+      root.style.setProperty("--accent", "#ec4899");
+      root.style.setProperty("--accent-glow", "rgba(236, 72, 153, 0.25)");
+      root.style.setProperty("--accent-dim", "rgba(236, 72, 153, 0.12)");
+      root.style.setProperty("--accent-dark", "#be185d");
+    } else if (accentColor === "amber") {
+      root.style.setProperty("--accent", "#E8803A");
+      root.style.setProperty("--accent-glow", "rgba(232, 128, 58, 0.18)");
+      root.style.setProperty("--accent-dim", "rgba(232, 128, 58, 0.13)");
+      root.style.setProperty("--accent-dark", "#A04C18");
+    } else if (accentColor === "green") {
+      root.style.setProperty("--accent", "#10b981");
+      root.style.setProperty("--accent-glow", "rgba(16, 185, 129, 0.25)");
+      root.style.setProperty("--accent-dim", "rgba(16, 185, 129, 0.12)");
+      root.style.setProperty("--accent-dark", "#047857");
+    } else if (accentColor === "teal") {
+      root.style.setProperty("--accent", "#06b6d4");
+      root.style.setProperty("--accent-glow", "rgba(6, 182, 212, 0.25)");
+      root.style.setProperty("--accent-dim", "rgba(6, 182, 212, 0.12)");
+      root.style.setProperty("--accent-dark", "#0891b2");
+    } else if (accentColor === "rose") {
+      root.style.setProperty("--accent", "#f43f5e");
+      root.style.setProperty("--accent-glow", "rgba(244, 63, 94, 0.25)");
+      root.style.setProperty("--accent-dim", "rgba(244, 63, 94, 0.12)");
+      root.style.setProperty("--accent-dark", "#e11d48");
+    } else if (accentColor === "yellow") {
+      root.style.setProperty("--accent", "#eab308");
+      root.style.setProperty("--accent-glow", "rgba(234, 179, 8, 0.25)");
+      root.style.setProperty("--accent-dim", "rgba(234, 179, 8, 0.12)");
+      root.style.setProperty("--accent-dark", "#ca8a04");
+    } else if (accentColor === "indigo") {
+      root.style.setProperty("--accent", "#6366f1");
+      root.style.setProperty("--accent-glow", "rgba(99, 102, 241, 0.25)");
+      root.style.setProperty("--accent-dim", "rgba(99, 102, 241, 0.12)");
+      root.style.setProperty("--accent-dark", "#4f46e5");
+    }
+  }, [accentColor]);
+
   useEffect(() => {
     const unStatus = listen<StatusPayload>("status", (e) => {
       setStatus(e.payload.status);
@@ -377,11 +469,8 @@ export default function App() {
     const unSetup = listen<SetupProgress>("setup_progress", (e) => {
       const p = e.payload;
       if (p.stage === "done") {
-        setToastMessage(p.message);
         setSetupProgress(null);
-        setShowToast(true);
-        if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-        toastTimerRef.current = setTimeout(() => setShowToast(false), 4000);
+        triggerToast(p.message, "success");
       } else {
         setSetupProgress(p);
       }
@@ -392,10 +481,8 @@ export default function App() {
         try {
           setUser(u);
           if (u) {
-            // Load settings from Rust (already loaded from disk on startup)
             const rustSettings = await invoke<Settings>("get_settings").catch(() => null);
             if (rustSettings) setSettings(rustSettings);
-            // Load transcripts from SQLite
             const entries = await invoke<TranscriptEntry[]>("get_transcript_log").catch(() => []);
             setTranscripts(entries);
           } else {
@@ -451,21 +538,59 @@ export default function App() {
   const copyEntry = useCallback((text: string, key: string) => {
     navigator.clipboard.writeText(text).then(() => {
       setCopiedKey(key);
+      triggerToast("Copied to clipboard!", "success");
       setTimeout(() => setCopiedKey(null), 1500);
-    }).catch(() => {});
-  }, []);
+    }).catch(() => {
+      triggerToast("Failed to copy", "error");
+    });
+  }, [triggerToast]);
 
   const deleteEntry = useCallback((id: number | undefined) => {
     if (!id) return;
     setTranscripts(prev => prev.filter(t => t.id !== id));
+    if (searchResults) {
+      setSearchResults(prev => prev ? prev.filter(t => t.id !== id) : null);
+    }
     invoke("delete_transcript", { id }).catch(console.error);
-  }, []);
+    triggerToast("Recording deleted", "info");
+  }, [searchResults, triggerToast]);
 
   const clearAll = useCallback(async () => {
     setTranscripts([]);
     setSearchResults(null);
     setSearchQuery("");
     await invoke("clear_all_db_transcripts").catch(console.error);
+    triggerToast("All recordings cleared", "info");
+  }, [triggerToast]);
+
+  const handleAutoType = useCallback((text: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    invoke("trigger_auto_type", { text }).catch(console.error);
+    triggerToast("Typing text...", "info");
+  }, [triggerToast]);
+
+  const startEditing = useCallback((id: number | undefined, text: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (id === undefined) return;
+    setEditingId(id);
+    setEditingText(text);
+  }, []);
+
+  const saveEdit = useCallback((id: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!editingText.trim()) return;
+    setTranscripts(prev => prev.map(t => t.id === id ? { ...t, text: editingText } : t));
+    if (searchResults) {
+      setSearchResults(prev => prev ? prev.map(t => t.id === id ? { ...t, text: editingText } : t) : null);
+    }
+    invoke("update_transcript", { id, text: editingText }).catch(console.error);
+    setEditingId(null);
+    triggerToast("Transcript updated!", "success");
+  }, [editingText, searchResults, triggerToast]);
+
+  const cancelEditing = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingId(null);
   }, []);
 
   const searchGenRef = useRef(0);
@@ -636,6 +761,35 @@ export default function App() {
                     ))}
                   </div>
                   <span className="field-hint">Applied to every transcript after Whisper</span>
+                </div>
+              </div>
+              <div className="settings-section">
+                <p className="settings-section-title">Visual Customization</p>
+                <div className="field-group">
+                  <label className="field-label">Accent Theme</label>
+                  <div className="accent-picker">
+                    {([
+                      { id: "amber", name: "Orange", color: "#E8803A" },
+                      { id: "purple", name: "Purple", color: "#a855f7" },
+                      { id: "blue", name: "Blue", color: "#3b82f6" },
+                      { id: "pink", name: "Pink", color: "#ec4899" },
+                      { id: "green", name: "Green", color: "#10b981" },
+                      { id: "teal", name: "Teal", color: "#06b6d4" },
+                      { id: "rose", name: "Rose", color: "#f43f5e" },
+                      { id: "yellow", name: "Yellow", color: "#eab308" },
+                      { id: "indigo", name: "Indigo", color: "#6366f1" }
+                    ] as const).map((theme) => (
+                      <button
+                        key={theme.id}
+                        className={`accent-btn ${accentColor === theme.id ? "accent-btn--active" : ""}`}
+                        style={{ "--btn-color": theme.color } as React.CSSProperties}
+                        onClick={() => setAccentColor(theme.id)}
+                        title={theme.name}
+                        type="button"
+                      />
+                    ))}
+                  </div>
+                  <span className="field-hint">Choose your primary theme color for glows, buttons, and recording overlay</span>
                 </div>
               </div>
               <div className="settings-section">
@@ -837,6 +991,16 @@ export default function App() {
                 )}
 
                 <div className="bento-feed-list">
+                  {status === "transcribing" && (
+                    <div className="skeleton-card">
+                      <div className="skeleton-header">
+                        <div className="skeleton-time shimmer" />
+                        <div className="skeleton-badge shimmer" />
+                      </div>
+                      <div className="skeleton-line shimmer" style={{ width: "90%" }} />
+                      <div className="skeleton-line shimmer" style={{ width: "65%", marginBottom: 0 }} />
+                    </div>
+                  )}
                   {displayList.length === 0 ? (
                     searchResults !== null ? (
                       <div className="empty">
@@ -867,37 +1031,86 @@ export default function App() {
                       <div key={date} className="date-group" style={{ animation: "none", padding: 0 }}>
                         <div className="date-label">{date}</div>
                         {entries.map((t, i) => {
-                          const key    = `${t.timestamp}-${i}`;
+                          const key    = t.id ? String(t.id) : `${t.timestamp}-${i}`;
                           const copied = copiedKey === key;
+                          const isEditing = editingId === t.id;
                           return (
                             <div
                               key={key}
-                              className={`entry${copied ? " entry--copied" : ""}`}
+                              className={`entry${copied ? " entry--copied" : ""}${isEditing ? " entry--editing" : ""}`}
                               style={{ "--entry-index": Math.min(i, 5) } as React.CSSProperties}
-                              onClick={() => copyEntry(t.text, key)}
-                              title="Click to copy"
+                              onClick={() => !isEditing && copyEntry(t.text, key)}
+                              title={isEditing ? undefined : "Click to copy"}
                             >
                               <div className="entry-header">
                                 <div className="entry-time">{formatTime(t.timestamp)}</div>
                                 <div className="entry-actions">
-                                  <span className={`entry-copy${copied ? " entry-copy--done" : ""}`} aria-hidden="true">
+                                  <button
+                                    className="entry-action-btn"
+                                    title="Auto-type into last window"
+                                    onClick={(e) => handleAutoType(t.text, e)}
+                                  >
+                                    <IcType />
+                                  </button>
+                                  <button
+                                    className="entry-action-btn"
+                                    title="Edit transcription"
+                                    onClick={(e) => startEditing(t.id, t.text, e)}
+                                  >
+                                    <IcEdit />
+                                  </button>
+                                  <button
+                                    className={`entry-action-btn ${copied ? "entry-action-btn--copied" : ""}`}
+                                    title="Copy to clipboard"
+                                    onClick={(e) => { e.stopPropagation(); copyEntry(t.text, key); }}
+                                  >
                                     {copied ? <IcCheck /> : <IcCopy />}
-                                  </span>
-                                  <span
-                                    className="entry-delete"
-                                    aria-label="Delete"
-                                    onClick={e => { e.stopPropagation(); deleteEntry(t.id); }}
+                                  </button>
+                                  <button
+                                    className="entry-action-btn entry-action-btn--delete"
+                                    title="Delete recording"
+                                    onClick={(e) => { e.stopPropagation(); deleteEntry(t.id); }}
                                   >
                                     <IcTrash />
-                                  </span>
+                                  </button>
                                 </div>
                               </div>
-                              <p className="entry-text">{t.text}</p>
-                              {t.mode && (
-                                <div className="entry-footer">
-                                  <span className="mode-badge">{t.mode}</span>
+                              {isEditing ? (
+                                <div className="entry-edit-wrapper" onClick={e => e.stopPropagation()}>
+                                  <textarea
+                                    className="entry-edit-textarea"
+                                    value={editingText}
+                                    onChange={e => setEditingText(e.target.value)}
+                                    autoFocus
+                                    rows={3}
+                                  />
+                                  <div className="entry-edit-actions">
+                                    <button className="entry-edit-btn entry-edit-btn--save" onClick={(e) => saveEdit(t.id!, e)}>
+                                      Save
+                                    </button>
+                                    <button className="entry-edit-btn entry-edit-btn--cancel" onClick={cancelEditing}>
+                                      Cancel
+                                    </button>
+                                  </div>
                                 </div>
+                              ) : (
+                                <p className="entry-text">{t.text}</p>
                               )}
+                              <div className="entry-footer" style={{ display: "flex", gap: "6px", flexWrap: "wrap", marginTop: "8px" }}>
+                                {t.mode && (
+                                  <span className="mode-badge" title="Formatting mode">{t.mode}</span>
+                                )}
+                                {t.engine && (
+                                  <span className={`engine-badge engine-badge--${t.engine.toLowerCase()}`} title="AI engine">
+                                    {t.engine}
+                                  </span>
+                                )}
+                                {t.language && t.language !== "auto" && (
+                                  <span className="lang-badge" title="Detected language">
+                                    {t.language.toUpperCase()}
+                                  </span>
+                                )}
+                              </div>
                             </div>
                           );
                         })}
@@ -1075,7 +1288,12 @@ export default function App() {
       )}
 
       {showToast && (
-        <div className="setup-toast">✓ {toastMessage}</div>
+        <div className={`app-toast app-toast--${toastType}`}>
+          <span className="toast-icon">
+            {toastType === "success" ? "✓" : toastType === "error" ? "✕" : "ℹ"}
+          </span>
+          <span className="toast-message">{toastMessage}</span>
+        </div>
       )}
     </div>
   );

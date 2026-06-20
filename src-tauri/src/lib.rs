@@ -291,7 +291,7 @@ async fn coordinator(
                         eprintln!("[auto_type] spawn_blocking failed: {e:?}");
                     }
 
-                    let db_entry = db::TranscriptEntry {
+                    let mut db_entry = db::TranscriptEntry {
                         id: 0,
                         text: polished,
                         raw_text: Some(raw_text),
@@ -302,8 +302,13 @@ async fn coordinator(
                     };
                     {
                         let conn = db.lock().unwrap();
-                        if let Err(e) = db::insert_transcript(&conn, &db_entry) {
-                            eprintln!("Failed to save transcript to DB: {e}");
+                        match db::insert_transcript(&conn, &db_entry) {
+                            Ok(inserted_id) => {
+                                db_entry.id = inserted_id;
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to save transcript to DB: {e}");
+                            }
                         }
                     }
                     app.emit("transcript", &db_entry).ok();
@@ -416,6 +421,23 @@ fn delete_transcript(id: i64, state: tauri::State<'_, AppState>) {
     if let Err(e) = db::delete_transcript(&conn, id) {
         eprintln!("Failed to delete transcript {id}: {e}");
     }
+}
+
+#[tauri::command]
+fn update_transcript(id: i64, text: String, state: tauri::State<'_, AppState>) {
+    let conn = state.db.lock().unwrap();
+    if let Err(e) = db::update_transcript(&conn, id, &text) {
+        eprintln!("Failed to update transcript {id}: {e}");
+    }
+}
+
+#[tauri::command]
+async fn trigger_auto_type(text: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        auto_type::type_text(&text)
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -621,6 +643,8 @@ pub fn run() {
             search_transcripts,
             clear_all_db_transcripts,
             delete_transcript,
+            update_transcript,
+            trigger_auto_type,
             stop_recording,
             oauth::start_google_oauth,
             get_output_mode,

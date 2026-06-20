@@ -26,7 +26,7 @@
         "title": "",
         "url": "/?window=overlay",
         "width": 90,
-        "height": 20,
+        "height": 30,
         "decorations": false,
         "transparent": true,
         "alwaysOnTop": true,

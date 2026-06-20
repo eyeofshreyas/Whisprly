@@ -124,6 +124,11 @@ pub fn delete_transcript(conn: &Connection, id: i64) -> Result<()> {
     Ok(())
 }
 
+pub fn update_transcript(conn: &Connection, id: i64, new_text: &str) -> Result<()> {
+    conn.execute("UPDATE transcripts SET text = ?1 WHERE id = ?2", params![new_text, id])?;
+    Ok(())
+}
+
 pub fn init_settings(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS settings (
