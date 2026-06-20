@@ -623,6 +623,14 @@ pub fn run() {
                 })
                 .build(app)?;
 
+            // Set the window icon explicitly so Linux dock/taskbar picks it up.
+            // The tray uses default_window_icon() but the dock reads the window's own icon.
+            if let Some(w) = app.get_webview_window("main") {
+                if let Some(icon) = app.default_window_icon() {
+                    let _ = w.set_icon(icon.clone());
+                }
+            }
+
             // ── Close-to-tray: intercept CloseRequested on main window ──
             let ah = app_handle.clone();
             app.get_webview_window("main").unwrap().on_window_event(move |event| {
