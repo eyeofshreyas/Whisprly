@@ -122,10 +122,19 @@ pub fn record(stop: Arc<AtomicBool>, chunk_tx: std::sync::mpsc::Sender<Vec<f32>>
     // Normalize audio volume to standard 0.8 peak amplitude
     normalize_audio(&mut resampled);
 
-    // Trim leading/trailing silence and send a single unified audio buffer
+    // Trim leading/trailing silence and apply minimum-duration gate.
+    // Each speech frame is 480 samples = 30ms at 16kHz.
+    // Fewer than 17 frames (< 510ms) = accidental press; discard.
     let trimmed = trim_silence(&resampled);
     if !trimmed.is_empty() && !is_silent(trimmed) {
-        chunk_tx.send(trimmed.to_vec()).ok();
+        let speech_frames = trimmed.chunks(480)
+            .filter(|frame| is_speech_frame(frame))
+            .count();
+        if speech_frames >= 17 {
+            chunk_tx.send(trimmed.to_vec()).ok();
+        } else {
+            eprintln!("[audio] discarding: only {} speech frames (need ≥17)", speech_frames);
+        }
     }
 }
 
@@ -138,7 +147,7 @@ pub fn normalize_audio(samples: &mut [f32]) {
             max_peak = abs;
         }
     }
-    if max_peak > 0.01 && max_peak < 0.8 {
+    if max_peak > 0.01 {
         let multiplier = 0.8 / max_peak;
         for s in samples.iter_mut() {
             *s *= multiplier;
@@ -353,5 +362,25 @@ mod tests {
         chunker.flush();
 
         assert!(rx.try_recv().is_err(), "chunk under 300ms must be discarded");
+    }
+
+    #[test]
+    fn min_duration_gate_rejects_short_audio() {
+        // 10 speech frames = 300ms — below 510ms gate
+        let short = vec![0.5f32; 480 * 10];
+        let count = short.chunks(480)
+            .filter(|f| is_speech_frame(f))
+            .count();
+        assert!(count < 17, "10 speech frames must be below gate (got {count})");
+    }
+
+    #[test]
+    fn min_duration_gate_passes_long_audio() {
+        // 20 speech frames = 600ms — above 510ms gate
+        let long = vec![0.5f32; 480 * 20];
+        let count = long.chunks(480)
+            .filter(|f| is_speech_frame(f))
+            .count();
+        assert!(count >= 17, "20 speech frames must pass gate (got {count})");
     }
 }

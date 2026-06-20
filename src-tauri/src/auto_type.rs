@@ -1,12 +1,13 @@
 /// Inject transcribed text into the currently focused window.
 ///
-/// On Linux/Wayland strategy:
-///   - GNOME Wayland: skip enigo (triggers Remote Desktop portal every time)
-///                    → ydotool → xdotool → wl-copy clipboard
-///   - Other Wayland: enigo → ydotool → xdotool → wl-copy clipboard
-///   - X11:           enigo → xdotool
+/// On Linux/Wayland:
+///   ydotool type (uinput, kernel-level — bypasses GNOME Remote Desktop portal)
+///   → clipboard fallback
+///   xdotool and enigo are both skipped: they use XTEST/D-Bus which triggers
+///   the GNOME Remote Desktop permission dialog on every session.
 ///
-/// On Windows and macOS `enigo` is used directly.
+/// On Linux/X11:  xdotool type → enigo
+/// On macOS/Windows: enigo directly
 pub fn type_text(text: &str) {
     let text = text.trim();
     if text.is_empty() {
@@ -15,16 +16,22 @@ pub fn type_text(text: &str) {
 
     #[cfg(target_os = "linux")]
     {
-        let session = std::env::var("XDG_SESSION_TYPE")
-            .unwrap_or_default()
-            .to_lowercase();
-        if session == "wayland" {
+        // Detect Wayland via either env var — XDG_SESSION_TYPE may not be
+        // inherited by the Tauri process, but WAYLAND_DISPLAY always is.
+        let session = std::env::var("XDG_SESSION_TYPE").unwrap_or_default().to_lowercase();
+        let wayland_display = std::env::var("WAYLAND_DISPLAY").unwrap_or_default();
+        if session == "wayland" || !wayland_display.is_empty() {
             wayland_type(text);
             return;
         }
+        // X11 on Linux: xdotool then enigo (no portal on real X11).
+        if try_xdotool(text) { return; }
+        if try_enigo(text)   { return; }
+        eprintln!("[wisperflow] auto-type failed. Text: {text}");
+        return;
     }
 
-    // X11, macOS, Windows
+    // macOS, Windows
     x11_type(text);
 }
 
@@ -32,16 +39,9 @@ pub fn type_text(text: &str) {
 
 #[cfg(target_os = "linux")]
 fn wayland_type(text: &str) {
-    // On GNOME Wayland, enigo uses the Remote Desktop D-Bus portal which
-    // shows a permission dialog every session — skip it entirely.
-    let desktop = std::env::var("XDG_CURRENT_DESKTOP")
-        .unwrap_or_default()
-        .to_uppercase();
-    let is_gnome = desktop.contains("GNOME");
-
-    if !is_gnome && try_enigo(text) { return; }  // KDE / others: try enigo first
-    if try_ydotool(text)            { return; }  // ydotool (uinput, no portal)
-    if try_xdotool(text)            { return; }  // XWayland fallback
+    // xdotool (XTEST) and enigo (D-Bus) both trigger the GNOME Remote Desktop
+    // portal. Only ydotoold (uinput/kernel) bypasses it entirely.
+    if try_ydotool(text) { return; }
     eprintln!("[wisperflow] All auto-type methods failed — copying to clipboard.");
     copy_to_clipboard(text);
     eprintln!("[wisperflow] Text in clipboard — press Ctrl+V to paste.");
@@ -62,7 +62,6 @@ fn try_enigo(text: &str) -> bool {
     use enigo::{Enigo, Keyboard, Settings};
     match Enigo::new(&Settings::default()) {
         Ok(mut e) => {
-            // Type character by character for a typewriter feel
             for ch in text.chars() {
                 let _ = e.text(&ch.to_string());
                 std::thread::sleep(std::time::Duration::from_millis(20));
@@ -75,50 +74,44 @@ fn try_enigo(text: &str) -> bool {
 }
 
 #[cfg(target_os = "linux")]
-fn try_ydotool(text: &str) -> bool {
-    // Type word-by-word with a short pause between words for a typewriter feel.
-    // split_inclusive keeps the trailing space with each word: "hello " "world"
-    let words: Vec<&str> = text.split_inclusive(' ').collect();
-    let total = words.len();
-
-    for (i, word) in words.iter().enumerate() {
-        let result = std::process::Command::new("ydotool")
-            .env("YDOTOOL_SOCKET", "/tmp/.ydotool_socket")
-            .args(["type", "--", word])
-            .output();
-
-        match result {
-            Ok(o) if o.status.success() => {
-                // Pause between words (skip delay after the last word)
-                if i < total - 1 {
-                    std::thread::sleep(std::time::Duration::from_millis(55));
-                }
-            }
-            Ok(o) => {
-                let stderr = String::from_utf8_lossy(&o.stderr);
-                let stdout = String::from_utf8_lossy(&o.stdout);
-                eprintln!(
-                    "[wisperflow] ydotool failed (exit={:?}): stderr={:?} stdout={:?}\n\
-                     → Is ydotoold running? Try: sudo systemctl start ydotoold",
-                    o.status.code(), stderr.trim(), stdout.trim()
-                );
-                return false;
-            }
-            Err(e) => { eprintln!("[wisperflow] ydotool not found: {e}"); return false; }
-        }
-    }
-    true
-}
-
-#[cfg(target_os = "linux")]
 fn try_xdotool(text: &str) -> bool {
+    // xdotool injects directly via X11/XWayland — avoids ydotoold entirely.
+    // ydotoold creates two virtual uinput devices; routing keystrokes through it
+    // causes the compositor to receive each keystroke twice (double output).
+    // xdotool has no such issue and works for any XWayland-based target window.
     match std::process::Command::new("xdotool")
-        .args(["type", "--clearmodifiers", "--", text])
+        .args(["type", "--clearmodifiers", "--delay", "20", "--", text])
         .output()
     {
         Ok(o) if o.status.success() => true,
         Ok(o)  => { eprintln!("[wisperflow] xdotool: {}", String::from_utf8_lossy(&o.stderr)); false }
         Err(e) => { eprintln!("[wisperflow] xdotool not found: {e}"); false }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn try_ydotool(text: &str) -> bool {
+    // Fallback for native Wayland windows that are invisible to XWayland/xdotool.
+    // Single call avoids inter-call race conditions in ydotoold's async queue.
+    let result = std::process::Command::new("ydotool")
+        .env("YDOTOOL_SOCKET", "/tmp/.ydotool_socket")
+        .args(["type", "--key-delay", "20", "--", text])
+        .output();
+
+    match result {
+        Ok(o) if o.status.success() => {
+            // ydotoold processes events asynchronously after ydotool exits.
+            // Wait long enough for the full text to flush before returning.
+            let drain_ms = (text.chars().count() as u64) * 30 + 300;
+            std::thread::sleep(std::time::Duration::from_millis(drain_ms));
+            true
+        }
+        Ok(o) => {
+            eprintln!("[wisperflow] ydotool type failed: {:?}",
+                String::from_utf8_lossy(&o.stderr).trim());
+            false
+        }
+        Err(e) => { eprintln!("[wisperflow] ydotool not found: {e}"); false }
     }
 }
 
