@@ -549,20 +549,8 @@ pub fn run() {
                 }
             });
 
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", target_os = "windows"))]
             std::thread::spawn(move || hotkey::start_listener(tx));
-
-            #[cfg(target_os = "windows")]
-            {
-                use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
-                let shortcut = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::Space);
-                app.handle().global_shortcut().on_shortcut(shortcut, move |_app, _sc, event| {
-                    match event.state() {
-                        ShortcutState::Pressed  => { let _ = tx.send(HotkeyEvent::Start); }
-                        ShortcutState::Released => { let _ = tx.send(HotkeyEvent::Stop); }
-                    }
-                })?;
-            }
             tauri::async_runtime::spawn(coordinator(rx, app_handle.clone(), settings, db.clone()));
             let db_for_setup = db.clone();
             let app_for_setup = app_handle.clone();

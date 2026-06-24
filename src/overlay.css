@@ -26,13 +26,14 @@ html, body, #root {
   align-items: center;
   justify-content: center;
   border-radius: 999px;
-  background: rgba(15, 23, 42, 0.28); /* Translucent glass */
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.14); /* Crisp glass edge */
-  box-shadow: 
-    0 4px 16px 0 rgba(0, 0, 0, 0.4), 
-    inset 0 0.5px 0 rgba(255, 255, 255, 0.18); /* Glass interior sheen */
+  /* backdrop-filter is intentionally omitted: on Windows/WebView2 it causes the
+     transparent window background to render as solid black. Opaque background
+     compensates for the missing blur on all platforms. */
+  background: rgba(15, 23, 42, 0.90);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow:
+    0 4px 16px 0 rgba(0, 0, 0, 0.4),
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.18);
   cursor: grab;
   overflow: hidden;
   transition: box-shadow 0.3s ease, transform 0.2s ease, border-color 0.3s ease;
