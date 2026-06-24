@@ -1,72 +1,48 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
   <defs>
-
-    <!-- Base: vertical amber gradient — dark at bottom, bright amber mid, golden top -->
-    <linearGradient id="wf-amber" x1="0" y1="1" x2="0" y2="0" gradientUnits="objectBoundingBox">
-      <stop offset="0%"   stop-color="#7A2406"/>
-      <stop offset="30%"  stop-color="#B84E18"/>
-      <stop offset="65%"  stop-color="#E8803A"/>
-      <stop offset="100%" stop-color="#F5A060"/>
+    <!-- Background Gradient -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1E1735" />
+      <stop offset="100%" stop-color="#0E0B1C" />
     </linearGradient>
 
-    <!-- Side lighting: left edge marginally warmer, right edge cooler — adds tube roundness -->
-    <linearGradient id="wf-side" x1="0" y1="0" x2="1" y2="0" gradientUnits="objectBoundingBox">
-      <stop offset="0%"   stop-color="#FFA060" stop-opacity="0.22"/>
-      <stop offset="45%"  stop-color="#E8803A" stop-opacity="0"/>
-      <stop offset="100%" stop-color="#6B2000" stop-opacity="0.28"/>
+    <!-- Spectrum Bars Gradient -->
+    <linearGradient id="barGrad" x1="0%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#E8803A" />
+      <stop offset="50%" stop-color="#EC4899" />
+      <stop offset="100%" stop-color="#A855F7" />
     </linearGradient>
 
-    <!-- Specular: cream highlight on lit upper surface of tube -->
-    <linearGradient id="wf-spec" gradientUnits="userSpaceOnUse" x1="0" y1="30" x2="0" y2="115">
-      <stop offset="0%"   stop-color="#FFF4DC" stop-opacity="0.92"/>
-      <stop offset="45%"  stop-color="#FFD89A" stop-opacity="0.18"/>
-      <stop offset="100%" stop-color="#FFD89A" stop-opacity="0"/>
-    </linearGradient>
-
-    <!-- Chrome rim: sharp near-white glint at the very top edge -->
-    <linearGradient id="wf-chrome" gradientUnits="userSpaceOnUse" x1="0" y1="28" x2="0" y2="52">
-      <stop offset="0%"   stop-color="#FFFFFF" stop-opacity="0.88"/>
-      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
-    </linearGradient>
-
-    <!-- Mask: the W tube silhouette -->
-    <mask id="wf-mask">
-      <path
-        d="M 22,155 C 22,80 42,38 62,38 C 82,38 88,108 100,108 C 112,108 118,38 138,38 C 158,38 178,80 178,155"
-        stroke="white" stroke-width="32" stroke-linecap="round" fill="none"
-      />
-    </mask>
-
-    <!-- Outer glow filter -->
-    <filter id="wf-glow" x="-45%" y="-45%" width="190%" height="190%">
-      <feGaussianBlur in="SourceAlpha" stdDeviation="11" result="blur"/>
-      <feFlood flood-color="#E8803A" flood-opacity="0.55" result="glowColor"/>
-      <feComposite in="glowColor" in2="blur" operator="in" result="coloredBlur"/>
+    <!-- Glow Effect for Bars -->
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="4" result="blur" />
       <feMerge>
-        <feMergeNode in="coloredBlur"/>
-        <feMergeNode in="SourceGraphic"/>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
       </feMerge>
     </filter>
-
   </defs>
 
-  <!-- ── Layer 0: Ambient glow behind the shape ────────────────────────────── -->
-  <path
-    d="M 22,155 C 22,80 42,38 62,38 C 82,38 88,108 100,108 C 112,108 118,38 138,38 C 158,38 178,80 178,155"
-    fill="none" stroke="#E8803A" stroke-width="40" stroke-linecap="round"
-    opacity="0.20" filter="url(#wf-glow)"
-  />
+  <!-- Background -->
+  <rect width="200" height="200" rx="44" fill="url(#bgGrad)" />
+  
+  <!-- Subtle inner border for premium feel -->
+  <rect width="196" height="196" x="2" y="2" rx="42" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="2" />
 
-  <!-- ── Layer 1: Base amber fill (main tube body) ─────────────────────────── -->
-  <rect x="0" y="0" width="200" height="200" fill="url(#wf-amber)" mask="url(#wf-mask)"/>
-
-  <!-- ── Layer 2: Side lighting (adds tube roundness) ──────────────────────── -->
-  <rect x="0" y="0" width="200" height="200" fill="url(#wf-side)"   mask="url(#wf-mask)"/>
-
-  <!-- ── Layer 3: Specular highlight (lit upper surface) ───────────────────── -->
-  <rect x="0" y="0" width="200" height="200" fill="url(#wf-spec)"   mask="url(#wf-mask)"/>
-
-  <!-- ── Layer 4: Chrome rim (sharp reflective top edge) ───────────────────── -->
-  <rect x="0" y="0" width="200" height="200" fill="url(#wf-chrome)" mask="url(#wf-mask)"/>
-
+  <!-- 13 spectrum bars tracing the W silhouette, bottom-aligned at y=152 -->
+  <g filter="url(#glow)">
+    <rect x="30"  y="48"  width="9" height="104" rx="4.5" fill="url(#barGrad)"/>
+    <rect x="41"  y="76"  width="9" height="76"  rx="4.5" fill="url(#barGrad)"/>
+    <rect x="52"  y="107" width="9" height="45"  rx="4.5" fill="url(#barGrad)"/>
+    <rect x="63"  y="130" width="9" height="22"  rx="4.5" fill="url(#barGrad)"/>
+    <rect x="74"  y="110" width="9" height="42"  rx="4.5" fill="url(#barGrad)"/>
+    <rect x="85"  y="84"  width="9" height="68"  rx="4.5" fill="url(#barGrad)"/>
+    <rect x="96"  y="58"  width="9" height="94"  rx="4.5" fill="url(#barGrad)"/>
+    <rect x="107" y="84"  width="9" height="68"  rx="4.5" fill="url(#barGrad)"/>
+    <rect x="118" y="110" width="9" height="42"  rx="4.5" fill="url(#barGrad)"/>
+    <rect x="129" y="130" width="9" height="22"  rx="4.5" fill="url(#barGrad)"/>
+    <rect x="140" y="107" width="9" height="45"  rx="4.5" fill="url(#barGrad)"/>
+    <rect x="151" y="76"  width="9" height="76"  rx="4.5" fill="url(#barGrad)"/>
+    <rect x="162" y="48"  width="9" height="104" rx="4.5" fill="url(#barGrad)"/>
+  </g>
 </svg>

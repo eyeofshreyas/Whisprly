@@ -28,10 +28,10 @@ pub fn type_text(text: &str) {
         if try_xdotool(text) { return; }
         if try_enigo(text)   { return; }
         eprintln!("[wisperflow] auto-type failed. Text: {text}");
-        return;
     }
 
     // macOS, Windows
+    #[cfg(not(target_os = "linux"))]
     x11_type(text);
 }
 
@@ -47,12 +47,21 @@ fn wayland_type(text: &str) {
     eprintln!("[wisperflow] Text in clipboard — press Ctrl+V to paste.");
 }
 
-// ── X11 / macOS / Windows path ────────────────────────────────────────────────
+// ── macOS / Windows path ─────────────────────────────────────────────────────
 
+#[cfg(not(target_os = "linux"))]
 fn x11_type(text: &str) {
-    if try_enigo(text)   { return; }
-    #[cfg(target_os = "linux")]
-    { if try_xdotool(text) { return; } }
+    if try_enigo(text) { return; }
+    // Clipboard fallback: transcript is preserved even if keyboard injection fails.
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(mut cb) = arboard::Clipboard::new() {
+            if cb.set_text(text).is_ok() {
+                eprintln!("[wisperflow] enigo failed — transcript copied to clipboard. Press Ctrl+V to paste.");
+                return;
+            }
+        }
+    }
     eprintln!("[wisperflow] auto-type failed. Text: {text}");
 }
 
