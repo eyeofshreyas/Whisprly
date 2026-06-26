@@ -399,16 +399,21 @@ fn get_output_mode(state: tauri::State<'_, AppState>) -> String {
 #[tauri::command]
 fn set_output_mode(state: tauri::State<'_, AppState>, mode: String) -> Result<(), String> {
     if ["prose", "email", "code", "auto"].contains(&mode.as_str()) {
-        state.settings.lock().unwrap().output_mode = mode.clone();
-        // Persist
-        let s = state.settings.lock().unwrap().clone();
+        let s = {
+            let mut settings = state.settings.lock().unwrap();
+            settings.output_mode = mode;
+            settings.clone()
+        };
         let json = serde_json::json!({
-            "groqApiKey": s.groq_api_key,
-            "pythonCmd":  s.python_cmd,
-            "language":   s.language,
-            "outputMode": s.output_mode,
+            "groqApiKey":         s.groq_api_key,
+            "pythonCmd":          s.python_cmd,
+            "language":           s.language,
+            "outputMode":         s.output_mode,
+            "postprocessModel":   s.postprocess_model,
+            "customVocabulary":   s.custom_vocabulary,
+            "customInstructions": s.custom_instructions,
         });
-        std::fs::write(&state.settings_path, json.to_string()).ok();
+        std::fs::write(&state.settings_path, json.to_string()).map_err(|e| e.to_string())?;
         Ok(())
     } else {
         Err(format!("invalid mode: {mode}"))
