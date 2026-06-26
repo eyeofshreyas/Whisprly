@@ -152,7 +152,15 @@ async fn coordinator(
                         continue;
                     }
 
-                    let s = settings.lock().unwrap().clone();
+                    let s = match settings.lock() {
+                        Ok(guard) => guard.clone(),
+                        Err(e) => {
+                            eprintln!("[coordinator] settings mutex poisoned: {e}");
+                            emit_status(&app, "idle", Some("Internal error".into()));
+                            hide_overlay(&app);
+                            continue;
+                        }
+                    };
                     let language = transcribe::language_param(&s.language);
                     let wav = audio::to_wav_from_samples(combined_samples);
 
@@ -167,7 +175,7 @@ async fn coordinator(
 
                         // 1. Previous transcript as conversational context (up to 600 chars)
                         let last_tx = {
-                            let conn = db.lock().unwrap();
+                            let conn = db.lock().unwrap_or_else(|e| e.into_inner());
                             db::get_transcripts(&conn, 1)
                                 .ok()
                                 .and_then(|list| list.first().map(|entry| entry.text.clone()))
@@ -301,7 +309,7 @@ async fn coordinator(
                         timestamp: chrono::Utc::now().to_rfc3339(),
                     };
                     {
-                        let conn = db.lock().unwrap();
+                        let conn = db.lock().unwrap_or_else(|e| e.into_inner());
                         match db::insert_transcript(&conn, &db_entry) {
                             Ok(inserted_id) => {
                                 db_entry.id = inserted_id;
@@ -335,23 +343,23 @@ async fn save_settings(
     custom_vocabulary: String,
     custom_instructions: String,
 ) -> Result<(), String> {
-    let path = {
-        let mut s = state.settings.lock().unwrap();
-        s.groq_api_key = groq_api_key.clone();
-        s.python_cmd   = python_cmd.clone();
-        s.language     = language.clone();
-        s.postprocess_model = postprocess_model.clone();
-        s.custom_vocabulary = custom_vocabulary.clone();
+    let (path, output_mode) = {
+        let mut s = state.settings.lock().map_err(|e| e.to_string())?;
+        s.groq_api_key        = groq_api_key.clone();
+        s.python_cmd          = python_cmd.clone();
+        s.language            = language.clone();
+        s.postprocess_model   = postprocess_model.clone();
+        s.custom_vocabulary   = custom_vocabulary.clone();
         s.custom_instructions = custom_instructions.clone();
-        state.settings_path.clone()
+        (state.settings_path.clone(), s.output_mode.clone())
     };
     let json = serde_json::json!({
-        "groqApiKey": groq_api_key,
-        "pythonCmd":  python_cmd,
-        "language":   language,
-        "postprocessModel": postprocess_model,
-        "outputMode": state.settings.lock().unwrap().output_mode,
-        "customVocabulary": custom_vocabulary,
+        "groqApiKey":         groq_api_key,
+        "pythonCmd":          python_cmd,
+        "language":           language,
+        "postprocessModel":   postprocess_model,
+        "outputMode":         output_mode,
+        "customVocabulary":   custom_vocabulary,
         "customInstructions": custom_instructions,
     });
     std::fs::write(&path, json.to_string()).map_err(|e| e.to_string())?;
@@ -360,7 +368,7 @@ async fn save_settings(
 
 #[tauri::command]
 async fn get_settings(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
-    let s = state.settings.lock().unwrap();
+    let s = state.settings.lock().map_err(|e| e.to_string())?;
     Ok(serde_json::json!({
         "groqApiKey": s.groq_api_key,
         "pythonCmd": s.python_cmd,
@@ -373,19 +381,31 @@ async fn get_settings(state: tauri::State<'_, AppState>) -> Result<serde_json::V
 
 #[tauri::command]
 fn get_transcript_log(state: tauri::State<'_, AppState>) -> Vec<db::TranscriptEntry> {
-    let conn = state.db.lock().unwrap();
+    let conn = match state.db.lock() {
+        Ok(g) => g,
+        Err(e) => {
+            eprintln!("[get_transcript_log] db mutex poisoned: {e}");
+            return vec![];
+        }
+    };
     db::get_transcripts(&conn, 200).unwrap_or_default()
 }
 
 #[tauri::command]
 fn search_transcripts(query: String, state: tauri::State<'_, AppState>) -> Vec<db::TranscriptEntry> {
-    let conn = state.db.lock().unwrap();
+    let conn = match state.db.lock() {
+        Ok(g) => g,
+        Err(e) => { eprintln!("search_transcripts: db mutex poisoned: {e}"); return vec![]; }
+    };
     db::search_transcripts(&conn, &query).unwrap_or_default()
 }
 
 #[tauri::command]
 fn clear_all_db_transcripts(state: tauri::State<'_, AppState>) {
-    let conn = state.db.lock().unwrap();
+    let conn = match state.db.lock() {
+        Ok(g) => g,
+        Err(e) => { eprintln!("clear_all_db_transcripts: db mutex poisoned: {e}"); return; }
+    };
     if let Err(e) = db::clear_all_transcripts(&conn) {
         eprintln!("Failed to clear DB transcripts: {e}");
     }
@@ -393,14 +413,14 @@ fn clear_all_db_transcripts(state: tauri::State<'_, AppState>) {
 
 #[tauri::command]
 fn get_output_mode(state: tauri::State<'_, AppState>) -> String {
-    state.settings.lock().unwrap().output_mode.clone()
+    state.settings.lock().map(|s| s.output_mode.clone()).unwrap_or_default()
 }
 
 #[tauri::command]
 fn set_output_mode(state: tauri::State<'_, AppState>, mode: String) -> Result<(), String> {
     if ["prose", "email", "code", "auto"].contains(&mode.as_str()) {
         let s = {
-            let mut settings = state.settings.lock().unwrap();
+            let mut settings = state.settings.lock().map_err(|e| e.to_string())?;
             settings.output_mode = mode;
             settings.clone()
         };
@@ -422,7 +442,10 @@ fn set_output_mode(state: tauri::State<'_, AppState>, mode: String) -> Result<()
 
 #[tauri::command]
 fn delete_transcript(id: i64, state: tauri::State<'_, AppState>) {
-    let conn = state.db.lock().unwrap();
+    let conn = match state.db.lock() {
+        Ok(g) => g,
+        Err(e) => { eprintln!("delete_transcript: db mutex poisoned: {e}"); return; }
+    };
     if let Err(e) = db::delete_transcript(&conn, id) {
         eprintln!("Failed to delete transcript {id}: {e}");
     }
@@ -430,7 +453,10 @@ fn delete_transcript(id: i64, state: tauri::State<'_, AppState>) {
 
 #[tauri::command]
 fn update_transcript(id: i64, text: String, state: tauri::State<'_, AppState>) {
-    let conn = state.db.lock().unwrap();
+    let conn = match state.db.lock() {
+        Ok(g) => g,
+        Err(e) => { eprintln!("update_transcript: db mutex poisoned: {e}"); return; }
+    };
     if let Err(e) = db::update_transcript(&conn, id, &text) {
         eprintln!("Failed to update transcript {id}: {e}");
     }
@@ -498,7 +524,7 @@ pub fn run() {
                 .join("settings.json");
             if let Ok(data) = std::fs::read_to_string(&settings_file) {
                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(&data) {
-                    let mut s = settings.lock().unwrap();
+                    let mut s = settings.lock().unwrap_or_else(|e| e.into_inner());
                     if let Some(v) = json["groqApiKey"].as_str() { s.groq_api_key = v.to_string(); }
                     if let Some(v) = json["pythonCmd"].as_str()  { s.python_cmd   = v.to_string(); }
                     if let Some(v) = json["language"].as_str()   { s.language     = v.to_string(); }
@@ -533,7 +559,7 @@ pub fn run() {
                 .and_then(|p| p.parent().map(|d| d.join("sidecar").join("whisper_server.py")))
                 .unwrap_or_else(|| std::path::PathBuf::from("sidecar/whisper_server.py"));
 
-            let python_cmd_clone = settings.lock().unwrap().python_cmd.clone();
+            let python_cmd_clone = settings.lock().map(|s| s.python_cmd.clone()).unwrap_or_else(|_| "python3".to_string());
             let whisper_process_clone = whisper_process.clone();
 
             std::thread::spawn(move || {
@@ -545,7 +571,9 @@ pub fn run() {
                     .spawn()
                 {
                     Ok(child) => {
-                        *whisper_process_clone.lock().unwrap() = Some(child);
+                        if let Ok(mut guard) = whisper_process_clone.lock() {
+                            *guard = Some(child);
+                        }
                         eprintln!("[whisper_server] server spawned successfully.");
                     }
                     Err(e) => {
