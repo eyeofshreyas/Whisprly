@@ -75,7 +75,6 @@ fn try_enigo(text: &str) -> bool {
                 let _ = e.text(&ch.to_string());
                 std::thread::sleep(std::time::Duration::from_millis(20));
             }
-            let _ = e.text(" ");
             true
         }
         Err(err) => { eprintln!("[wisperflow] enigo failed: {err}"); false }

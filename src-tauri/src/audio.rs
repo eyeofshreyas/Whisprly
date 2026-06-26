@@ -167,7 +167,7 @@ pub fn trim_silence(samples: &[f32]) -> &[f32] {
     }
 
     let mut end = samples.len();
-    while end >= start + 480 {
+    while end > start + 480 {
         if is_speech_frame(&samples[end - 480..end]) {
             break;
         }
