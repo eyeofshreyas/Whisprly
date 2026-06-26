@@ -28,16 +28,34 @@ fn is_hallucination(text: &str) -> bool {
     if clean.is_empty() || clean.chars().all(|c| !c.is_alphanumeric()) {
         return true;
     }
-    if HALLUCINATIONS.iter().any(|h| clean.contains(h)) {
+
+    // Split clean text into whitespace-delimited words for phrase matching.
+    let text_words: Vec<&str> = clean.split_whitespace().collect();
+
+    let matched = HALLUCINATIONS.iter().any(|h| {
+        if h.chars().any(|c| !c.is_alphanumeric() && !c.is_whitespace()) {
+            // Bracket/symbol patterns (e.g. "[music]") — substring check is safe
+            // because they won't appear as part of ordinary speech words.
+            clean.contains(h)
+        } else {
+            // Text-only phrases: require whole-word sequence match to avoid
+            // false positives when the phrase is a substring of real speech.
+            let ph: Vec<&str> = h.split_whitespace().collect();
+            !ph.is_empty()
+                && text_words.windows(ph.len()).any(|w| w == ph.as_slice())
+        }
+    });
+    if matched {
         return true;
     }
+
     // Repeated-word hallucination: any alphabetic word (>1 char) appearing 4+ times in a row
-    let words: Vec<&str> = clean
+    let alpha_words: Vec<&str> = clean
         .split(|c: char| !c.is_alphabetic())
         .filter(|w| w.len() > 1)
         .collect();
-    if words.len() >= 4 {
-        for window in words.windows(4) {
+    if alpha_words.len() >= 4 {
+        for window in alpha_words.windows(4) {
             if window[0] == window[1] && window[1] == window[2] && window[2] == window[3] {
                 return true;
             }
