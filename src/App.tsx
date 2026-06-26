@@ -545,14 +545,18 @@ export default function App() {
     });
   }, [triggerToast]);
 
-  const deleteEntry = useCallback((id: number | undefined) => {
+  const deleteEntry = useCallback(async (id: number | undefined) => {
     if (!id) return;
     setTranscripts(prev => prev.filter(t => t.id !== id));
     if (searchResults) {
       setSearchResults(prev => prev ? prev.filter(t => t.id !== id) : null);
     }
-    invoke("delete_transcript", { id }).catch(console.error);
-    triggerToast("Recording deleted", "info");
+    try {
+      await invoke("delete_transcript", { id });
+      triggerToast("Recording deleted", "info");
+    } catch {
+      triggerToast("Failed to delete recording", "error");
+    }
   }, [searchResults, triggerToast]);
 
   const clearAll = useCallback(async () => {
@@ -576,16 +580,20 @@ export default function App() {
     setEditingText(text);
   }, []);
 
-  const saveEdit = useCallback((id: number, e: React.MouseEvent) => {
+  const saveEdit = useCallback(async (id: number, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!editingText.trim()) return;
     setTranscripts(prev => prev.map(t => t.id === id ? { ...t, text: editingText } : t));
     if (searchResults) {
       setSearchResults(prev => prev ? prev.map(t => t.id === id ? { ...t, text: editingText } : t) : null);
     }
-    invoke("update_transcript", { id, text: editingText }).catch(console.error);
     setEditingId(null);
-    triggerToast("Transcript updated!", "success");
+    try {
+      await invoke("update_transcript", { id, text: editingText });
+      triggerToast("Transcript updated!", "success");
+    } catch {
+      triggerToast("Failed to update transcript", "error");
+    }
   }, [editingText, searchResults, triggerToast]);
 
   const cancelEditing = useCallback((e: React.MouseEvent) => {
@@ -1225,7 +1233,7 @@ export default function App() {
                 <section className="bento-card">
                   <div className="card-header">
                     <h2 className="card-title">
-                      <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8">
+                      <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8">
                         <path d="M8 1.5l1.7 3.5 3.8.55-2.75 2.65.65 3.8L8 10.3l-3.4 1.7.65-3.8L2.5 5.55l3.8-.55L8 1.5z" />
                       </svg>
                       Formatting Style
