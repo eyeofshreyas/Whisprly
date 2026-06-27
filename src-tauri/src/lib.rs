@@ -18,6 +18,8 @@ mod platform;
 mod postprocess;
 mod setup;
 mod transcribe;
+#[cfg(target_os = "linux")]
+mod shortcut_wayland;
 
 pub enum HotkeyEvent {
     Start,
@@ -259,7 +261,16 @@ async fn coordinator(
 
                     let mut resolved_mode = s.output_mode.clone();
                     if resolved_mode == "auto" {
-                        if let Some(win_title) = platform::get_active_window_title() {
+                        // Spawn blocking so xdotool/xprop can't hang the coordinator.
+                        let win_title = tokio::time::timeout(
+                            std::time::Duration::from_secs(2),
+                            tokio::task::spawn_blocking(platform::get_active_window_title),
+                        )
+                        .await
+                        .ok()
+                        .and_then(|r| r.ok())
+                        .flatten();
+                        if let Some(win_title) = win_title {
                             let title_lower = win_title.to_lowercase();
                             eprintln!("[coordinator] active window title: {title_lower}");
                             if title_lower.contains("code") || title_lower.contains("cursor") || title_lower.contains("vscode") || title_lower.contains("vim") || title_lower.contains("terminal") || title_lower.contains("bash") || title_lower.contains("sh") || title_lower.contains("zsh") {
@@ -581,7 +592,17 @@ pub fn run() {
                 }
             });
 
-            #[cfg(any(target_os = "linux", target_os = "windows"))]
+            #[cfg(target_os = "linux")]
+            {
+                // On native Wayland use the XDG global-shortcuts portal (no `input` group needed).
+                // On X11 / XWayland fall back to the evdev listener.
+                if !std::env::var("WAYLAND_DISPLAY").unwrap_or_default().is_empty() {
+                    tauri::async_runtime::spawn(shortcut_wayland::register(tx));
+                } else {
+                    std::thread::spawn(move || hotkey::start_listener(tx));
+                }
+            }
+            #[cfg(target_os = "windows")]
             std::thread::spawn(move || hotkey::start_listener(tx));
             tauri::async_runtime::spawn(coordinator(rx, app_handle.clone(), settings, db.clone()));
             let db_for_setup = db.clone();

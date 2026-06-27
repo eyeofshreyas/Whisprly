@@ -73,7 +73,7 @@ fn filter_segments(json: &serde_json::Value) -> Option<String> {
     let segments = json["segments"].as_array()?;
     let text: String = segments
         .iter()
-        .filter(|seg| seg["no_speech_prob"].as_f64().unwrap_or(1.0) <= 0.6)
+        .filter(|seg| seg["no_speech_prob"].as_f64().unwrap_or(1.0) <= 0.2)
         .filter_map(|seg| seg["text"].as_str())
         .map(str::trim)
         .filter(|t| !t.is_empty())
@@ -113,6 +113,7 @@ pub async fn groq(
         .post("https://api.groq.com/openai/v1/audio/transcriptions")
         .header("Authorization", format!("Bearer {api_key}"))
         .multipart(form)
+        .timeout(std::time::Duration::from_secs(15))
         .send()
         .await
         .map_err(|e| e.to_string())?;
@@ -225,6 +226,18 @@ mod tests {
             "segments": [
                 {"text": "Thank you for watching.", "no_speech_prob": 0.85},
                 {"text": "Please subscribe.", "no_speech_prob": 0.92}
+            ]
+        });
+        assert_eq!(filter_segments(&json), None);
+    }
+
+    #[test]
+    fn filter_segments_rejects_ambiguous_no_speech_prob() {
+        // 0.3–0.6 range was previously accepted; tightened threshold to 0.2 rejects these
+        let json = serde_json::json!({
+            "segments": [
+                {"text": "Hmm.", "no_speech_prob": 0.35},
+                {"text": "Uh.", "no_speech_prob": 0.55}
             ]
         });
         assert_eq!(filter_segments(&json), None);

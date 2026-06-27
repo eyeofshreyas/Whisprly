@@ -160,44 +160,48 @@ async fn local_polish(
     let custom_vocab_owned = custom_vocab.to_string();
     let custom_instructions_owned = custom_instructions.to_string();
 
-    tokio::task::spawn_blocking(move || {
-        let mut args = vec![sidecar, "--mode".to_string(), mode_owned];
-        if !model_owned.is_empty() {
-            args.push("--model".to_string());
-            args.push(model_owned);
-        }
-        if !custom_vocab_owned.trim().is_empty() {
-            args.push("--custom-vocab".to_string());
-            args.push(custom_vocab_owned);
-        }
-        if !custom_instructions_owned.trim().is_empty() {
-            args.push("--custom-instructions".to_string());
-            args.push(custom_instructions_owned);
-        }
+    tokio::time::timeout(
+        Duration::from_secs(30),
+        tokio::task::spawn_blocking(move || {
+            let mut args = vec![sidecar, "--mode".to_string(), mode_owned];
+            if !model_owned.is_empty() {
+                args.push("--model".to_string());
+                args.push(model_owned);
+            }
+            if !custom_vocab_owned.trim().is_empty() {
+                args.push("--custom-vocab".to_string());
+                args.push(custom_vocab_owned);
+            }
+            if !custom_instructions_owned.trim().is_empty() {
+                args.push("--custom-instructions".to_string());
+                args.push(custom_instructions_owned);
+            }
 
-        let mut child = std::process::Command::new(&python)
-            .args(&args)
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .map_err(|e| e.to_string())?;
+            let mut child = std::process::Command::new(&python)
+                .args(&args)
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .map_err(|e| e.to_string())?;
 
-        if let Some(mut stdin) = child.stdin.take() {
-            stdin.write_all(raw_owned.as_bytes()).map_err(|e| e.to_string())?;
-        }
+            if let Some(mut stdin) = child.stdin.take() {
+                stdin.write_all(raw_owned.as_bytes()).map_err(|e| e.to_string())?;
+            }
 
-        let output = child.wait_with_output().map_err(|e| e.to_string())?;
+            let output = child.wait_with_output().map_err(|e| e.to_string())?;
 
-        if !output.status.success() {
-            let err = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("sidecar error: {err}"));
-        }
+            if !output.status.success() {
+                let err = String::from_utf8_lossy(&output.stderr);
+                return Err(format!("sidecar error: {err}"));
+            }
 
-        let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        Ok(if text.is_empty() { raw_owned } else { text })
-    })
+            let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            Ok(if text.is_empty() { raw_owned } else { text })
+        }),
+    )
     .await
+    .map_err(|_| "postprocess sidecar timed out after 30s".to_string())?
     .map_err(|e| e.to_string())?
 }
 
