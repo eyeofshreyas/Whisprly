@@ -146,15 +146,12 @@ pub async fn local(
     language: Option<String>,
     prompt: Option<String>,
 ) -> Result<String, String> {
-    use std::io::Write;
-
-    let mut tmp = tempfile::NamedTempFile::new().map_err(|e| e.to_string())?;
-    tmp.write_all(wav_bytes).map_err(|e| e.to_string())?;
-    let tmp_path = tmp.path().to_string_lossy().to_string();
+    use base64::Engine;
+    let audio_b64 = base64::engine::general_purpose::STANDARD.encode(wav_bytes);
 
     let client = reqwest::Client::new();
     let body = serde_json::json!({
-        "file": tmp_path,
+        "audio_b64": audio_b64,
         "language": language,
         "prompt": prompt
     });
@@ -165,12 +162,12 @@ pub async fn local(
         .timeout(std::time::Duration::from_secs(30))
         .send()
         .await
-        .map_err(|e| format!("Server connection failed: {e}. Is whisper_server.py running?"))?;
+        .map_err(|e| format!("Sidecar unreachable: {e}. Is Docker running?"))?;
 
     if !response.status().is_success() {
         let status = response.status();
         let body_text = response.text().await.unwrap_or_default();
-        return Err(format!("Whisper server error {status}: {body_text}"));
+        return Err(format!("Sidecar error {status}: {body_text}"));
     }
 
     let json: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
