@@ -40,7 +40,6 @@ interface StatusPayload {
 
 interface Settings {
   groqApiKey: string;
-  pythonCmd: string;
   language: string;
   postprocessModel?: string;
   customVocabulary?: string;
@@ -321,7 +320,7 @@ export default function App() {
   const [status, setStatus]         = useState<Status>("idle");
   const [statusMsg, setStatusMsg]   = useState("");
   const [transcripts, setTranscripts] = useState<TranscriptEntry[]>([]);
-  const [settings, setSettings]     = useState<Settings>({ groqApiKey: "", pythonCmd: "python", language: "auto", postprocessModel: "llama-3.1-8b-instant", customVocabulary: "", customInstructions: "" });
+  const [settings, setSettings]     = useState<Settings>({ groqApiKey: "", language: "auto", postprocessModel: "llama-3.1-8b-instant", customVocabulary: "", customInstructions: "" });
   const [saved, setSaved]           = useState(false);
   const [outputMode, setOutputMode] = useState<"prose" | "email" | "code" | "auto">("prose");
   const [activeNav, setActiveNav]   = useState("home");
@@ -351,7 +350,6 @@ export default function App() {
       const updated = { ...s, customVocabulary: vocabStr };
       invoke("save_settings", {
         groqApiKey: updated.groqApiKey,
-        pythonCmd:  updated.pythonCmd,
         language:   updated.language,
         postprocessModel: updated.postprocessModel ?? "llama-3.1-8b-instant",
         customVocabulary: updated.customVocabulary ?? "",
@@ -487,7 +485,7 @@ export default function App() {
             setTranscripts(entries);
           } else {
             setTranscripts([]);
-            setSettings({ groqApiKey: "", pythonCmd: "python", language: "auto", postprocessModel: "llama-3.1-8b-instant", customVocabulary: "", customInstructions: "" });
+            setSettings({ groqApiKey: "", language: "auto", postprocessModel: "llama-3.1-8b-instant", customVocabulary: "", customInstructions: "" });
           }
         } catch (err) {
           console.error("Auth change handler failed:", err);
@@ -525,7 +523,6 @@ export default function App() {
   const saveSettings = useCallback(async () => {
     await invoke("save_settings", {
       groqApiKey: settings.groqApiKey,
-      pythonCmd:  settings.pythonCmd,
       language:   settings.language,
       postprocessModel: settings.postprocessModel ?? "llama-3.1-8b-instant",
       customVocabulary: settings.customVocabulary ?? "",
@@ -798,20 +795,6 @@ export default function App() {
                     ))}
                   </div>
                   <span className="field-hint">Choose your primary theme color for glows, buttons, and recording overlay</span>
-                </div>
-              </div>
-              <div className="settings-section">
-                <p className="settings-section-title">Local Fallback</p>
-                <div className="field-group">
-                  <label className="field-label">Python command</label>
-                  <input
-                    type="text"
-                    className="field-input"
-                    value={settings.pythonCmd}
-                    onChange={(e) => setSettings((s) => ({ ...s, pythonCmd: e.target.value }))}
-                    placeholder="python"
-                  />
-                  <span className="field-hint">Used when Groq key is absent or fails</span>
                 </div>
               </div>
               <div className="settings-section">

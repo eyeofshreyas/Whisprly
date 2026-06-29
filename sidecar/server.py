@@ -6,7 +6,6 @@ POST /postprocess →  Ollama gemma4:4b via OLLAMA_URL env var
 GET  /health      →  liveness probe
 """
 import base64
-import json
 import os
 import sys
 import tempfile

@@ -35,8 +35,6 @@ struct StatusPayload {
 #[derive(Clone)]
 pub struct AppSettings {
     pub groq_api_key: String,
-    pub python_cmd: String,
-    pub sidecar_path: String,
     pub postprocess_model: String,
     pub output_mode: String,
     pub language: String,
@@ -45,11 +43,10 @@ pub struct AppSettings {
 }
 
 pub struct AppState {
-    pub settings:       Arc<Mutex<AppSettings>>,
-    pub db:             Arc<Mutex<Connection>>,
-    pub hotkey_tx:      tokio::sync::mpsc::UnboundedSender<HotkeyEvent>,
-    pub settings_path:  std::path::PathBuf,
-    pub ollama_process: Arc<Mutex<Option<std::process::Child>>>,
+    pub settings:      Arc<Mutex<AppSettings>>,
+    pub db:            Arc<Mutex<Connection>>,
+    pub hotkey_tx:     tokio::sync::mpsc::UnboundedSender<HotkeyEvent>,
+    pub settings_path: std::path::PathBuf,
 }
 
 struct RecordingHandle {
@@ -235,7 +232,7 @@ async fn coordinator(
                         Some(t) => Some(t),
                         None => {
                             eprintln!("[transcribe] falling back to local sidecar with prompt context: {:?}", final_prompt);
-                            match transcribe::local(&wav, &s.python_cmd, &s.sidecar_path, language.clone(), final_prompt.clone()).await {
+                            match transcribe::local(&wav, "", "", language.clone(), final_prompt.clone()).await {
                                 Ok(t) => {
                                     eprintln!("[transcribe] local ok: {:?}", t);
                                     used_engine = "local".to_string();
@@ -290,7 +287,7 @@ async fn coordinator(
                         &resolved_mode,
                         &s.postprocess_model,
                         &s.groq_api_key,
-                        &s.python_cmd,
+                        "",
                         &s.custom_vocabulary,
                         &s.custom_instructions,
                     )
@@ -347,7 +344,6 @@ async fn stop_recording(state: tauri::State<'_, AppState>) -> Result<(), String>
 async fn save_settings(
     state: tauri::State<'_, AppState>,
     groq_api_key: String,
-    python_cmd: String,
     language: String,
     postprocess_model: String,
     custom_vocabulary: String,
@@ -356,7 +352,6 @@ async fn save_settings(
     let (path, output_mode) = {
         let mut s = state.settings.lock().map_err(|e| e.to_string())?;
         s.groq_api_key        = groq_api_key.clone();
-        s.python_cmd          = python_cmd.clone();
         s.language            = language.clone();
         s.postprocess_model   = postprocess_model.clone();
         s.custom_vocabulary   = custom_vocabulary.clone();
@@ -365,7 +360,6 @@ async fn save_settings(
     };
     let json = serde_json::json!({
         "groqApiKey":         groq_api_key,
-        "pythonCmd":          python_cmd,
         "language":           language,
         "postprocessModel":   postprocess_model,
         "outputMode":         output_mode,
@@ -381,7 +375,6 @@ async fn get_settings(state: tauri::State<'_, AppState>) -> Result<serde_json::V
     let s = state.settings.lock().map_err(|e| e.to_string())?;
     Ok(serde_json::json!({
         "groqApiKey": s.groq_api_key,
-        "pythonCmd": s.python_cmd,
         "language": s.language,
         "postprocessModel": s.postprocess_model,
         "customVocabulary": s.custom_vocabulary,
@@ -436,7 +429,6 @@ fn set_output_mode(state: tauri::State<'_, AppState>, mode: String) -> Result<()
         };
         let json = serde_json::json!({
             "groqApiKey":         s.groq_api_key,
-            "pythonCmd":          s.python_cmd,
             "language":           s.language,
             "outputMode":         s.output_mode,
             "postprocessModel":   s.postprocess_model,
@@ -497,19 +489,9 @@ pub fn run() {
         .map(str::to_string)
         .or_else(|| std::env::var("GROQ_API").ok())
         .unwrap_or_default();
-    let python_cmd = if cfg!(windows) { "python".to_string() } else { "python3".to_string() };
-
-    let sidecar_path = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.join("sidecar").join("whisper_sidecar.py")))
-        .unwrap_or_else(|| std::path::PathBuf::from("sidecar/whisper_sidecar.py"))
-        .to_string_lossy()
-        .to_string();
 
     let settings = Arc::new(Mutex::new(AppSettings {
         groq_api_key,
-        python_cmd,
-        sidecar_path,
         postprocess_model: "llama-3.1-8b-instant".to_string(),
         output_mode: "prose".to_string(),
         language: "auto".to_string(),
@@ -535,7 +517,6 @@ pub fn run() {
                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(&data) {
                     let mut s = settings.lock().unwrap_or_else(|e| e.into_inner());
                     if let Some(v) = json["groqApiKey"].as_str() { s.groq_api_key = v.to_string(); }
-                    if let Some(v) = json["pythonCmd"].as_str()  { s.python_cmd   = v.to_string(); }
                     if let Some(v) = json["language"].as_str()   { s.language     = v.to_string(); }
                     if let Some(v) = json["postprocessModel"].as_str() { s.postprocess_model = v.to_string(); }
                     if let Some(v) = json["outputMode"].as_str() { s.output_mode  = v.to_string(); }
@@ -548,15 +529,11 @@ pub fn run() {
             let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<HotkeyEvent>();
             let cmd_tx = tx.clone();
 
-            let ollama_process: Arc<Mutex<Option<std::process::Child>>> =
-                Arc::new(Mutex::new(None));
-
             app.manage(AppState {
                 settings: settings.clone(),
                 db: db.clone(),
                 hotkey_tx: cmd_tx,
                 settings_path: settings_file.clone(),
-                ollama_process: ollama_process.clone(),
             });
 
             #[cfg(target_os = "linux")]
@@ -574,8 +551,7 @@ pub fn run() {
             tauri::async_runtime::spawn(coordinator(rx, app_handle.clone(), settings, db.clone()));
             let db_for_setup = db.clone();
             let app_for_setup = app_handle.clone();
-            let proc_for_setup = ollama_process.clone();
-            tauri::async_runtime::spawn(setup::check_and_setup(app_for_setup, db_for_setup, proc_for_setup));
+            tauri::async_runtime::spawn(setup::check_and_setup(app_for_setup, db_for_setup));
 
             // ── System tray ──
             let open_i = MenuItem::with_id(app, "open", "Open Whisprly", true, None::<&str>)?;
@@ -595,13 +571,6 @@ pub fn run() {
                         }
                     }
                     "quit" => {
-                        if let Some(state) = app.try_state::<AppState>() {
-                            if let Ok(mut guard) = state.ollama_process.lock() {
-                                if let Some(child) = guard.as_mut() {
-                                    child.kill().ok();
-                                }
-                            }
-                        }
                         app.exit(0);
                     }
                     _ => {}

@@ -21,7 +21,6 @@ fn emit(app: &AppHandle, stage: &str, percent: u8, message: &str) {
 pub async fn check_and_setup(
     app: AppHandle,
     db: Arc<Mutex<Connection>>,
-    _ollama_process: Arc<Mutex<Option<std::process::Child>>>,
 ) {
     let already_complete = {
         let conn = db.lock().expect("db mutex poisoned");
@@ -107,26 +106,33 @@ async fn docker_available() -> bool {
     .unwrap_or(false)
 }
 
+fn compose_dir() -> Result<std::path::PathBuf, String> {
+    // In `tauri dev` current_dir() is the project root — docker-compose.yml lives there.
+    // In production the file must sit next to the binary (or be bundled as a resource).
+    let candidates = [
+        std::env::current_dir().ok(),
+        std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.to_path_buf())),
+    ];
+    for dir in candidates.into_iter().flatten() {
+        if dir.join("docker-compose.yml").exists() {
+            return Ok(dir);
+        }
+    }
+    Err("docker-compose.yml not found. Place it next to the app binary or run from the project root.".into())
+}
+
 async fn ensure_containers_running() -> Result<(), String> {
     tokio::task::spawn_blocking(|| {
-        let compose_dir = std::env::current_exe()
-            .ok()
-            .and_then(|p| p.parent().map(|d| d.to_path_buf()))
-            .unwrap_or_else(|| std::path::PathBuf::from("."));
-
+        let dir = compose_dir()?;
         let output = std::process::Command::new("docker")
             .args(["compose", "up", "-d"])
-            .current_dir(&compose_dir)
+            .current_dir(&dir)
             .output()
             .map_err(|e| format!("docker not found: {e}"))?;
-
         if output.status.success() {
             Ok(())
         } else {
-            Err(format!(
-                "docker compose up failed: {}",
-                String::from_utf8_lossy(&output.stderr).trim()
-            ))
+            Err(format!("docker compose up failed: {}", String::from_utf8_lossy(&output.stderr).trim()))
         }
     })
     .await
