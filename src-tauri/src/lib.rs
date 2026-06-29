@@ -45,12 +45,11 @@ pub struct AppSettings {
 }
 
 pub struct AppState {
-    pub settings:        Arc<Mutex<AppSettings>>,
-    pub db:              Arc<Mutex<Connection>>,
-    pub hotkey_tx:       tokio::sync::mpsc::UnboundedSender<HotkeyEvent>,
-    pub settings_path:   std::path::PathBuf,
-    pub ollama_process:  Arc<Mutex<Option<std::process::Child>>>,
-    pub whisper_process: Arc<Mutex<Option<std::process::Child>>>,
+    pub settings:       Arc<Mutex<AppSettings>>,
+    pub db:             Arc<Mutex<Connection>>,
+    pub hotkey_tx:      tokio::sync::mpsc::UnboundedSender<HotkeyEvent>,
+    pub settings_path:  std::path::PathBuf,
+    pub ollama_process: Arc<Mutex<Option<std::process::Child>>>,
 }
 
 struct RecordingHandle {
@@ -551,8 +550,6 @@ pub fn run() {
 
             let ollama_process: Arc<Mutex<Option<std::process::Child>>> =
                 Arc::new(Mutex::new(None));
-            let whisper_process: Arc<Mutex<Option<std::process::Child>>> =
-                Arc::new(Mutex::new(None));
 
             app.manage(AppState {
                 settings: settings.clone(),
@@ -560,36 +557,6 @@ pub fn run() {
                 hotkey_tx: cmd_tx,
                 settings_path: settings_file.clone(),
                 ollama_process: ollama_process.clone(),
-                whisper_process: whisper_process.clone(),
-            });
-
-            // Start the persistent Whisper transcription server
-            let whisper_server_path = std::env::current_exe()
-                .ok()
-                .and_then(|p| p.parent().map(|d| d.join("sidecar").join("whisper_server.py")))
-                .unwrap_or_else(|| std::path::PathBuf::from("sidecar/whisper_server.py"));
-
-            let python_cmd_clone = settings.lock().map(|s| s.python_cmd.clone()).unwrap_or_else(|_| "python3".to_string());
-            let whisper_process_clone = whisper_process.clone();
-
-            std::thread::spawn(move || {
-                eprintln!("[whisper_server] spawning persistent server: {} {}", python_cmd_clone, whisper_server_path.display());
-                match std::process::Command::new(&python_cmd_clone)
-                    .arg(&whisper_server_path)
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null())
-                    .spawn()
-                {
-                    Ok(child) => {
-                        if let Ok(mut guard) = whisper_process_clone.lock() {
-                            *guard = Some(child);
-                        }
-                        eprintln!("[whisper_server] server spawned successfully.");
-                    }
-                    Err(e) => {
-                        eprintln!("[whisper_server] failed to spawn server: {e}");
-                    }
-                }
             });
 
             #[cfg(target_os = "linux")]
@@ -630,11 +597,6 @@ pub fn run() {
                     "quit" => {
                         if let Some(state) = app.try_state::<AppState>() {
                             if let Ok(mut guard) = state.ollama_process.lock() {
-                                if let Some(child) = guard.as_mut() {
-                                    child.kill().ok();
-                                }
-                            }
-                            if let Ok(mut guard) = state.whisper_process.lock() {
                                 if let Some(child) = guard.as_mut() {
                                     child.kill().ok();
                                 }
