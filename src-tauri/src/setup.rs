@@ -27,50 +27,70 @@ pub async fn check_and_setup(
         let conn = db.lock().expect("db mutex poisoned");
         crate::db::get_setting(&conn, "setup_complete").as_deref() == Some("true")
     };
-    if already_complete {
-        // Still ensure containers are running (they may have been stopped)
-        let _ = ensure_containers_running().await;
-        return;
+
+    // Fast path: sidecar already healthy — nothing to start
+    if sidecar_healthy().await {
+        if already_complete {
+            return;
+        }
+        // Containers running but setup flag not set — fall through to finish setup
+    } else {
+        // Sidecar not up: check Docker then bring containers up
+        if !already_complete {
+            emit(&app, "checking", 0, "Checking Docker...");
+            if !docker_available().await {
+                emit(&app, "error", 0,
+                    "Docker not found. Install Docker Desktop and restart the app. https://docs.docker.com/get-docker/");
+                return;
+            }
+        }
+
+        emit(&app, "starting_containers", 20, "Starting WisperFlow containers...");
+        if let Err(e) = ensure_containers_running().await {
+            emit(&app, "error", 0, &format!("Could not start containers: {e}"));
+            return;
+        }
+
+        emit(&app, "waiting_sidecar", 40, "Waiting for services to be ready...");
+        // ponytail: 30 polls × 2s = 60s max; matches spec
+        if !wait_for_sidecar(30).await {
+            emit(&app, "error", 0,
+                "Services did not start in time. Try restarting the app.");
+            return;
+        }
     }
 
-    emit(&app, "checking", 0, "Checking Docker...");
+    if !already_complete {
+        emit(&app, "waiting_ollama", 50, "Waiting for Ollama to be ready...");
+        if !wait_for_ollama(30).await {
+            emit(&app, "error", 0, "Ollama did not start in time. Try restarting the app.");
+            return;
+        }
 
-    if !docker_available().await {
-        emit(&app, "error", 0,
-            "Docker not found. Install Docker Desktop and restart the app. https://docs.docker.com/get-docker/");
-        return;
+        emit(&app, "pulling_model", 60, "Pulling gemma4:4b model (first run only)...");
+        if let Err(e) = ensure_model_pulled("gemma4:4b").await {
+            emit(&app, "error", 0, &format!("Model pull failed: {e}"));
+            return;
+        }
+
+        {
+            let conn = db.lock().expect("db mutex poisoned");
+            crate::db::set_setting(&conn, "setup_complete", "true").ok();
+        }
+
+        emit(&app, "done", 100, "Docker services ready.");
     }
+}
 
-    emit(&app, "starting_containers", 20, "Starting WisperFlow containers...");
-    if let Err(e) = ensure_containers_running().await {
-        emit(&app, "error", 0, &format!("Could not start containers: {e}"));
-        return;
-    }
-
-    emit(&app, "waiting_ollama", 40, "Waiting for Ollama to be ready...");
-    if !wait_for_ollama(30).await {
-        emit(&app, "error", 0, "Ollama did not start in time. Try restarting the app.");
-        return;
-    }
-
-    emit(&app, "pulling_model", 50, "Pulling gemma4:4b model (first run only)...");
-    if let Err(e) = ensure_model_pulled("gemma4:4b").await {
-        emit(&app, "error", 0, &format!("Model pull failed: {e}"));
-        return;
-    }
-
-    emit(&app, "waiting_sidecar", 80, "Waiting for sidecar to be ready...");
-    if !wait_for_sidecar(60).await {
-        emit(&app, "error", 0, "Whisper sidecar did not start in time (model may still be downloading). Try again in a minute.");
-        return;
-    }
-
-    {
-        let conn = db.lock().expect("db mutex poisoned");
-        crate::db::set_setting(&conn, "setup_complete", "true").ok();
-    }
-
-    emit(&app, "done", 100, "Docker services ready.");
+async fn sidecar_healthy() -> bool {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(2))
+        .build()
+        .unwrap_or_default()
+        .get("http://127.0.0.1:11435/health")
+        .send().await
+        .map(|r| r.status().is_success())
+        .unwrap_or(false)
 }
 
 async fn docker_available() -> bool {
@@ -89,99 +109,63 @@ async fn docker_available() -> bool {
 
 async fn ensure_containers_running() -> Result<(), String> {
     tokio::task::spawn_blocking(|| {
-        // Create shared network (idempotent)
-        std::process::Command::new("docker")
-            .args(["network", "create", "wisperflow"])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status().ok();
+        let compose_dir = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
 
-        // Start ollama (idempotent: --name fails if already running, that's fine)
-        let ollama = std::process::Command::new("docker")
-            .args([
-                "run", "-d", "--name", "wisperflow-ollama",
-                "--network", "wisperflow",
-                "-p", "127.0.0.1:11434:11434",
-                "-v", "wisperflow-ollama:/root/.ollama",
-                "--restart", "unless-stopped",
-                "ollama/ollama",
-            ])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::piped())
+        let output = std::process::Command::new("docker")
+            .args(["compose", "up", "-d"])
+            .current_dir(&compose_dir)
             .output()
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| format!("docker not found: {e}"))?;
 
-        // "already in use" is ok — container already running
-        if !ollama.status.success() {
-            let err = String::from_utf8_lossy(&ollama.stderr);
-            if !err.contains("already in use") {
-                return Err(format!("docker run ollama: {err}"));
-            }
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(format!(
+                "docker compose up failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            ))
         }
-
-        // Start sidecar
-        let sidecar = std::process::Command::new("docker")
-            .args([
-                "run", "-d", "--name", "wisperflow-sidecar",
-                "--network", "wisperflow",
-                "-p", "127.0.0.1:11435:11435",
-                "-e", "OLLAMA_URL=http://wisperflow-ollama:11434",
-                "-v", "wisperflow-cache:/root/.cache",
-                "--restart", "unless-stopped",
-                "wisperflow-sidecar:local",
-            ])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::piped())
-            .output()
-            .map_err(|e| e.to_string())?;
-
-        if !sidecar.status.success() {
-            let err = String::from_utf8_lossy(&sidecar.stderr);
-            if !err.contains("already in use") {
-                return Err(format!("docker run sidecar: {err}"));
-            }
-        }
-
-        Ok(())
     })
     .await
     .map_err(|e| e.to_string())?
 }
 
-async fn wait_for_ollama(max_secs: u64) -> bool {
+async fn wait_for_ollama(max_polls: u64) -> bool {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(2))
         .build()
         .unwrap_or_default();
-    for _ in 0..max_secs {
+    for _ in 0..max_polls {
         if client.get("http://localhost:11434/api/tags").send().await
             .map(|r| r.status().is_success()).unwrap_or(false)
         {
             return true;
         }
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
     }
     false
 }
 
-async fn wait_for_sidecar(max_secs: u64) -> bool {
+async fn wait_for_sidecar(max_polls: u64) -> bool {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(2))
         .build()
         .unwrap_or_default();
-    for _ in 0..max_secs {
+    for _ in 0..max_polls {
         if client.get("http://127.0.0.1:11435/health").send().await
             .map(|r| r.status().is_success()).unwrap_or(false)
         {
             return true;
         }
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
     }
     false
 }
 
 async fn ensure_model_pulled(model: &str) -> Result<(), String> {
-    // Check if already present
     let client = reqwest::Client::new();
     let tags: serde_json::Value = client
         .get("http://localhost:11434/api/tags")
@@ -196,7 +180,6 @@ async fn ensure_model_pulled(model: &str) -> Result<(), String> {
         return Ok(());
     }
 
-    // Pull the model (blocking stream — just wait for completion)
     let resp = client
         .post("http://localhost:11434/api/pull")
         .json(&serde_json::json!({"name": model, "stream": false}))
