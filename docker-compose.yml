@@ -1,0 +1,32 @@
+services:
+  ollama:
+    image: ollama/ollama
+    container_name: wisperflow-ollama
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - wisperflow-ollama:/root/.ollama
+    networks:
+      - wisperflow
+    restart: unless-stopped
+
+  sidecar:
+    build: ./sidecar
+    container_name: wisperflow-sidecar
+    ports:
+      - "127.0.0.1:11435:11435"
+    environment:
+      - OLLAMA_URL=http://ollama:11434
+    networks:
+      - wisperflow
+    depends_on:
+      - ollama
+    restart: unless-stopped
+
+networks:
+  wisperflow:
+    name: wisperflow
+
+volumes:
+  wisperflow-ollama:
+  wisperflow-cache:
