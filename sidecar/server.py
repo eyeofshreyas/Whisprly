@@ -66,6 +66,8 @@ async def transcribe(req: TranscribeRequest):
         tmp_path = f.name
 
     try:
+        if _whisper is None:
+            raise HTTPException(status_code=503, detail="Whisper model not loaded")
         segments_gen, _ = _whisper.transcribe(
             tmp_path,
             beam_size=5,
@@ -155,4 +157,4 @@ async def postprocess(req: PostprocessRequest):
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=11435, log_level="error")
+    uvicorn.run(app, host="0.0.0.0", port=11435, log_level="info")

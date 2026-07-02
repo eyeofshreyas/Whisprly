@@ -24,11 +24,11 @@ const LANGUAGES = [
 type Status = "idle" | "recording" | "transcribing";
 
 interface TranscriptEntry {
-  id?:       number;
+  id:        number;
   text:      string;
   raw_text?: string;
   engine:    string;
-  mode?:     string;
+  mode:      string;
   language?: string;
   timestamp: string;
 }
@@ -542,8 +542,7 @@ export default function App() {
     });
   }, [triggerToast]);
 
-  const deleteEntry = useCallback(async (id: number | undefined) => {
-    if (!id) return;
+  const deleteEntry = useCallback(async (id: number) => {
     setTranscripts(prev => prev.filter(t => t.id !== id));
     if (searchResults) {
       setSearchResults(prev => prev ? prev.filter(t => t.id !== id) : null);
@@ -570,9 +569,8 @@ export default function App() {
     triggerToast("Typing text...", "info");
   }, [triggerToast]);
 
-  const startEditing = useCallback((id: number | undefined, text: string, e: React.MouseEvent) => {
+  const startEditing = useCallback((id: number, text: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (id === undefined) return;
     setEditingId(id);
     setEditingText(text);
   }, []);
@@ -1076,7 +1074,7 @@ export default function App() {
                                     rows={3}
                                   />
                                   <div className="entry-edit-actions">
-                                    <button className="entry-edit-btn entry-edit-btn--save" onClick={(e) => saveEdit(t.id!, e)}>
+                                    <button className="entry-edit-btn entry-edit-btn--save" onClick={(e) => saveEdit(t.id, e)}>
                                       Save
                                     </button>
                                     <button className="entry-edit-btn entry-edit-btn--cancel" onClick={cancelEditing}>

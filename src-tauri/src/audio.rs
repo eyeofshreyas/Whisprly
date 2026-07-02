@@ -109,7 +109,7 @@ pub fn record(stop: Arc<AtomicBool>, chunk_tx: std::sync::mpsc::Sender<Vec<f32>>
 
     drop(stream);
 
-    let raw_samples = samples.lock().unwrap().clone();
+    let raw_samples = samples.lock().unwrap_or_else(|e| e.into_inner()).clone();
     let rms = if raw_samples.is_empty() { 0.0 } else {
         (raw_samples.iter().map(|&s| s*s).sum::<f32>() / raw_samples.len() as f32).sqrt()
     };
