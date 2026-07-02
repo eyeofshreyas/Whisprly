@@ -6,4 +6,5 @@ src-tauri/target/
 src-tauri/binaries/
 
 Modelfile/
-.superpowers
+.superpowerssidecar/__pycache__/
+sidecar/__pycache__/
