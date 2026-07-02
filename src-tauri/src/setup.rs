@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 use rusqlite::Connection;
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 
 #[derive(Serialize, Clone)]
 struct SetupProgress {
@@ -21,287 +21,178 @@ fn emit(app: &AppHandle, stage: &str, percent: u8, message: &str) {
 pub async fn check_and_setup(
     app: AppHandle,
     db: Arc<Mutex<Connection>>,
-    ollama_process: std::sync::Arc<std::sync::Mutex<Option<std::process::Child>>>,
 ) {
-    {
+    let already_complete = {
         let conn = db.lock().expect("db mutex poisoned");
-        if crate::db::get_setting(&conn, "setup_complete").as_deref() == Some("true") {
+        crate::db::get_setting(&conn, "setup_complete").as_deref() == Some("true")
+    };
+
+    // Fast path: sidecar already healthy — nothing to start
+    if sidecar_healthy().await {
+        if already_complete {
             return;
         }
-    }
-
-    emit(&app, "checking", 0, "Checking setup...");
-
-    #[cfg(target_os = "windows")]
-    {
-        let winget_ok = tokio::task::spawn_blocking(winget_available).await.unwrap_or(false);
-        if !winget_ok {
-            emit(&app, "installing_winget", 5, "Installing Windows Package Manager...");
-            if let Err(e) = install_winget().await {
-                eprintln!("install_winget error: {e}");
+        // Containers running but setup flag not set — fall through to finish setup
+    } else {
+        // Sidecar not up: check Docker then bring containers up
+        if !already_complete {
+            emit(&app, "checking", 0, "Checking Docker...");
+            if !docker_available().await {
                 emit(&app, "error", 0,
-                    "Could not install Package Manager. Install Ollama manually at ollama.com");
+                    "Docker not found. Install Docker Desktop and restart the app. https://docs.docker.com/get-docker/");
                 return;
             }
         }
-    }
 
-    let (ollama_running, model_present) = check_ollama().await;
-
-    if ollama_running && model_present {
-        let conn = db.lock().expect("db mutex poisoned");
-        crate::db::set_setting(&conn, "setup_complete", "true").ok();
-        return;
-    }
-
-    if !ollama_running {
-        emit(&app, "installing_ollama", 20, "Starting Ollama...");
-        match start_ollama(&app, &ollama_process).await {
-            Ok(()) => {}
-            Err(e) => {
-                emit(&app, "error", 0, &format!("Could not start Ollama: {e}"));
-                return;
-            }
+        emit(&app, "starting_containers", 20, "Starting WisperFlow containers...");
+        if let Err(e) = ensure_containers_running().await {
+            emit(&app, "error", 0, &format!("Could not start containers: {e}"));
+            return;
         }
-        let mut started = false;
-        for _ in 0..30 {
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            let (running, _) = check_ollama().await;
-            if running {
-                started = true;
-                break;
-            }
-        }
-        if !started {
-            emit(&app, "error", 0, "Ollama did not start in time. Please restart the app.");
+
+        emit(&app, "waiting_sidecar", 40, "Waiting for services to be ready...");
+        // ponytail: 30 polls × 2s = 60s max; matches spec
+        if !wait_for_sidecar(30).await {
+            emit(&app, "error", 0,
+                "Services did not start in time. Try restarting the app.");
             return;
         }
     }
 
-    if let Err(e) = create_model(&app).await {
-        emit(&app, "error", 0, &format!("Model import failed: {e}"));
-        return;
-    }
+    if !already_complete {
+        emit(&app, "waiting_ollama", 50, "Waiting for Ollama to be ready...");
+        if !wait_for_ollama(30).await {
+            emit(&app, "error", 0, "Ollama did not start in time. Try restarting the app.");
+            return;
+        }
 
-    {
-        let conn = db.lock().expect("db mutex poisoned");
-        crate::db::set_setting(&conn, "setup_complete", "true").ok();
-    }
+        emit(&app, "pulling_model", 60, "Pulling gemma4:4b model (first run only)...");
+        if let Err(e) = ensure_model_pulled("gemma4:4b").await {
+            emit(&app, "error", 0, &format!("Model pull failed: {e}"));
+            return;
+        }
 
-    emit(&app, "done", 100, "Gemma 4 ready. Local AI postprocessing enabled.");
+        {
+            let conn = db.lock().expect("db mutex poisoned");
+            crate::db::set_setting(&conn, "setup_complete", "true").ok();
+        }
+
+        emit(&app, "done", 100, "Docker services ready.");
+    }
 }
 
-#[cfg(target_os = "windows")]
-fn winget_available() -> bool {
-    std::process::Command::new("winget")
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
+async fn sidecar_healthy() -> bool {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(2))
+        .build()
+        .unwrap_or_default()
+        .get("http://127.0.0.1:11435/health")
+        .send().await
+        .map(|r| r.status().is_success())
         .unwrap_or(false)
 }
 
-#[cfg(target_os = "windows")]
-async fn install_winget() -> Result<(), String> {
-    let url = "https://github.com/microsoft/winget-cli/releases/latest/download/\
-               Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle";
-
-    let bytes = reqwest::get(url)
-        .await.map_err(|e| e.to_string())?
-        .bytes()
-        .await.map_err(|e| e.to_string())?
-        .to_vec();  // convert to Vec<u8> so it's Send
-
-    tokio::task::spawn_blocking(move || {
-        let tmp = std::env::temp_dir().join("AppInstaller.msixbundle");
-        std::fs::write(&tmp, &bytes).map_err(|e| e.to_string())?;
-        let status = std::process::Command::new("powershell")
-            .args(["-NoProfile", "-NonInteractive", "-Command", "Add-AppxPackage"])
-            .arg("-Path")
-            .arg(&tmp)
+async fn docker_available() -> bool {
+    tokio::task::spawn_blocking(|| {
+        std::process::Command::new("docker")
+            .arg("info")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
             .status()
-            .map_err(|e| e.to_string())?;
-        if status.success() { Ok(()) } else { Err("Add-AppxPackage failed".to_string()) }
+            .map(|s| s.success())
+            .unwrap_or(false)
+    })
+    .await
+    .unwrap_or(false)
+}
+
+fn compose_dir() -> Result<std::path::PathBuf, String> {
+    // In `tauri dev` current_dir() is the project root — docker-compose.yml lives there.
+    // In production the file must sit next to the binary (or be bundled as a resource).
+    let candidates = [
+        std::env::current_dir().ok(),
+        std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.to_path_buf())),
+    ];
+    for dir in candidates.into_iter().flatten() {
+        if dir.join("docker-compose.yml").exists() {
+            return Ok(dir);
+        }
+    }
+    Err("docker-compose.yml not found. Place it next to the app binary or run from the project root.".into())
+}
+
+async fn ensure_containers_running() -> Result<(), String> {
+    tokio::task::spawn_blocking(|| {
+        let dir = compose_dir()?;
+        let output = std::process::Command::new("docker")
+            .args(["compose", "up", "-d"])
+            .current_dir(&dir)
+            .output()
+            .map_err(|e| format!("docker not found: {e}"))?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(format!("docker compose up failed: {}", String::from_utf8_lossy(&output.stderr).trim()))
+        }
     })
     .await
     .map_err(|e| e.to_string())?
 }
 
-async fn check_ollama() -> (bool, bool) {
+async fn wait_for_ollama(max_polls: u64) -> bool {
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(3))
+        .timeout(std::time::Duration::from_secs(2))
         .build()
         .unwrap_or_default();
-    let resp = client.get("http://localhost:11434/api/tags").send().await;
-    match resp {
-        Ok(r) if r.status().is_success() => {
-            let json: serde_json::Value = r.json().await.unwrap_or_default();
-            let has_model = json["models"]
-                .as_array()
-                .map(|ms| ms.iter().any(|m| {
-                    m["name"].as_str().unwrap_or("").starts_with("gemma4:4b")
-                }))
-                .unwrap_or(false);
-            (true, has_model)
+    for _ in 0..max_polls {
+        if client.get("http://localhost:11434/api/tags").send().await
+            .map(|r| r.status().is_success()).unwrap_or(false)
+        {
+            return true;
         }
-        _ => (false, false),
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
     }
+    false
 }
 
-async fn start_ollama(
-    app: &AppHandle,
-    ollama_process: &std::sync::Arc<std::sync::Mutex<Option<std::process::Child>>>,
-) -> Result<(), String> {
-    #[cfg(target_os = "windows")]
-    {
-        let _ = (app, ollama_process);
-        return install_ollama_winget().await;
-    }
-    #[cfg(target_os = "linux")]
-    {
-        return start_ollama_bundled(app, ollama_process).await;
-    }
-    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
-    {
-        let _ = (app, ollama_process);
-        Ok(())
-    }
-}
-
-#[cfg(target_os = "windows")]
-async fn install_ollama_winget() -> Result<(), String> {
-    tokio::task::spawn_blocking(|| {
-        let status = std::process::Command::new("winget")
-            .args([
-                "install", "Ollama.Ollama",
-                "--silent",
-                "--accept-package-agreements",
-                "--accept-source-agreements",
-            ])
-            .status()
-            .map_err(|e| e.to_string())?;
-        if status.success() { Ok(()) } else { Err("winget install Ollama failed".to_string()) }
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
-#[cfg(target_os = "linux")]
-async fn start_ollama_bundled(
-    app: &AppHandle,
-    ollama_process: &std::sync::Arc<std::sync::Mutex<Option<std::process::Child>>>,
-) -> Result<(), String> {
-    use std::os::unix::fs::PermissionsExt;
-
-    let bin = app
-        .path()
-        .resource_dir()
-        .map_err(|e| e.to_string())?
-        .join("ollama");
-
-    if !bin.exists() {
-        return Err(format!("Bundled ollama binary not found at {}", bin.display()));
-    }
-
-    tokio::task::spawn_blocking({
-        let bin = bin.clone();
-        move || {
-            std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755))
-                .map_err(|e| e.to_string())
+async fn wait_for_sidecar(max_polls: u64) -> bool {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(2))
+        .build()
+        .unwrap_or_default();
+    for _ in 0..max_polls {
+        if client.get("http://127.0.0.1:11435/health").send().await
+            .map(|r| r.status().is_success()).unwrap_or(false)
+        {
+            return true;
         }
-    })
-    .await
-    .map_err(|e| e.to_string())??;
-
-    let child = std::process::Command::new(&bin)
-        .arg("serve")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .map_err(|e| format!("failed to spawn bundled ollama: {e}"))?;
-
-    *ollama_process.lock().expect("ollama_process mutex poisoned") = Some(child);
-    Ok(())
-}
-
-async fn create_model(app: &AppHandle) -> Result<(), String> {
-    let app = app.clone();
-    tokio::task::spawn_blocking(move || {
-        let ollama = ollama_bin(&app);
-        let gguf   = gguf_path(&app);
-
-        if !gguf.exists() {
-            return Err(format!("Model file not found: {}", gguf.display()));
-        }
-
-        let tmp_modelfile = std::env::temp_dir().join("whisprly_modelfile");
-        std::fs::write(&tmp_modelfile, format!("FROM {}\n", gguf.display()))
-            .map_err(|e| format!("failed to write Modelfile: {e}"))?;
-
-        let mut child = std::process::Command::new(&ollama)
-            .args(["create", "gemma4:4b", "-f"])
-            .arg(&tmp_modelfile)
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .map_err(|e| e.to_string())?;
-
-        if let Some(stdout) = child.stdout.take() {
-            use std::io::BufRead;
-            for line in std::io::BufReader::new(stdout).lines() {
-                let line = match line { Ok(l) => l, Err(_) => continue };
-                let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) else {
-                    emit(&app, "pulling_model", 0, &line);
-                    continue;
-                };
-
-                let completed = json["completed"].as_u64().unwrap_or(0);
-                let total     = json["total"].as_u64().unwrap_or(0);
-                let percent   = if total > 0 { (completed * 100 / total).min(99) as u8 } else { 0 };
-                let message   = if total > 0 {
-                    format!(
-                        "Importing model ({:.1} GB / {:.1} GB)",
-                        completed as f64 / 1e9,
-                        total as f64 / 1e9,
-                    )
-                } else {
-                    json["status"].as_str().unwrap_or("Importing model...").to_string()
-                };
-
-                emit(&app, "pulling_model", percent, &message);
-            }
-        }
-
-        let _ = std::fs::remove_file(&tmp_modelfile);
-
-        let status = child.wait().map_err(|e| e.to_string())?;
-        if !status.success() {
-            return Err("ollama create gemma4:4b failed".to_string());
-        }
-        Ok(())
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
-fn gguf_path(app: &AppHandle) -> std::path::PathBuf {
-    app.path()
-        .resource_dir()
-        .unwrap_or_default()
-        .join("Modelfile")
-        .join("gemma-4-E4B-it-Q4_K_M.gguf")
-}
-
-fn ollama_bin(app: &AppHandle) -> std::path::PathBuf {
-    #[cfg(target_os = "linux")]
-    {
-        app.path()
-            .resource_dir()
-            .unwrap_or_default()
-            .join("ollama")
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
     }
-    #[cfg(not(target_os = "linux"))]
-    {
-        let _ = app;
-        std::path::PathBuf::from("ollama")
+    false
+}
+
+async fn ensure_model_pulled(model: &str) -> Result<(), String> {
+    let client = reqwest::Client::new();
+    let tags: serde_json::Value = client
+        .get("http://localhost:11434/api/tags")
+        .send().await.map_err(|e| e.to_string())?
+        .json().await.map_err(|e| e.to_string())?;
+
+    let already_present = tags["models"].as_array()
+        .map(|ms| ms.iter().any(|m| m["name"].as_str().unwrap_or("").starts_with(model)))
+        .unwrap_or(false);
+
+    if already_present {
+        return Ok(());
+    }
+
+    let resp = client
+        .post("http://localhost:11434/api/pull")
+        .json(&serde_json::json!({"name": model, "stream": false}))
+        .timeout(std::time::Duration::from_secs(600))
+        .send().await.map_err(|e| e.to_string())?;
+
+    if resp.status().is_success() { Ok(()) } else {
+        Err(format!("pull failed: {}", resp.status()))
     }
 }

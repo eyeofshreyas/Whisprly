@@ -17,8 +17,7 @@
     <a href="#-quick-start">Quick Start</a> ·
     <a href="#-how-it-works">How It Works</a> ·
     <a href="#-architecture">Architecture</a> ·
-    <a href="#-development">Development</a> ·
-    <a href="#-contributing">Contributing</a>
+    <a href="#-development">Development</a>
   </p>
 </div>
 
@@ -26,7 +25,7 @@
 
 **Whisprly** is a cross-platform (Windows & Linux Wayland/X11) desktop dictation app that turns speech into polished, auto-typed text in any app — browser, IDE, Slack, Word, terminal — in under a second. No clicking. No copy-pasting. Just press a hotkey, speak naturally, and let go.
 
-> Built with Tauri v2 (Rust backend) + React frontend. Transcription via Groq's `whisper-large-v3-turbo` or a local Whisper server. AI cleanup via Groq LLMs or local Ollama models. Everything private by default — all transcripts stay on your machine in SQLite.
+> Built with Tauri v2 (Rust backend) + React frontend. Transcription via Groq's `whisper-large-v3-turbo` with a local [faster-whisper](https://github.com/SYSTRAN/faster-whisper) fallback served via Docker. AI cleanup via Groq LLMs or a local Ollama model. Everything private by default — all transcripts stay on your machine in SQLite.
 
 ---
 
@@ -34,7 +33,7 @@
 
 | | |
 |---|---|
-| 🎙 **One-hotkey dictation** | Hold `Ctrl + Win` to record, release to transcribe — works in every app |
+| 🎙 **One-hotkey dictation** | Hold `Ctrl + Win` to record, release to transcribe (X11/Windows) · `Ctrl+Shift+Space` toggle on Wayland |
 | ✨ **AI polish** | Fixes punctuation, removes filler words, corrects capitalisation — never rephrases |
 | 🔄 **4 output modes** | Prose · Email · Code · **Auto** (detects active window — VSCode, Outlook, etc.) |
 | 🌐 **12 languages** | Auto-detect or lock to English, Hindi, Spanish, French, Japanese, Arabic, and more |
@@ -43,66 +42,82 @@
 | 🔍 **Full-text search** | SQLite FTS5 index over all past transcripts |
 | 🔒 **Local-first history** | Every transcript saved locally — no cloud, no tracking |
 | 🎚 **Acoustic normalization** | Dynamic 0.8 amplitude normalization for quiet or distant mics |
-| 🏠 **Local fallback** | Primary: Groq Whisper cloud API. Fallback: local faster-whisper Python server |
-| 🔧 **Custom correction model** | Configure any Groq model ID or fine-tuned Ollama model in Settings |
+| 🐳 **Docker local fallback** | Primary: Groq Whisper cloud API. Fallback: local faster-whisper + Ollama via Docker |
 
 ---
 
 ## ⚡ Quick Start
 
-### Option A — Download a release
+### Prerequisites
 
-1. Go to the [Releases](https://github.com/eyeofshreyas/Whisprly/releases) page and download the installer for your platform.
-2. Create a `.env` file next to the binary with your Groq API key:
-   ```env
-   GROQ_API=gsk_your_key_here
-   ```
-   Get a **free** key at [console.groq.com](https://console.groq.com) — takes 30 seconds. Skip this to use the local fallback.
-3. Launch the app — the tray icon appears.
-4. Hold **`Ctrl + Win`**, speak, release — your words are typed into the active window.
+- [Node.js 18+](https://nodejs.org)
+- [Rust stable](https://rustup.rs)
+- [Docker Desktop](https://docs.docker.com/get-docker/) *(for local fallback — optional if you have a Groq key)*
 
-### Option B — Build from source
-
-**Prerequisites:** Node.js 18+, Rust stable ([rustup.rs](https://rustup.rs)), Python 3.9+ *(optional — local fallback only)*
+### 1. Clone and install
 
 ```bash
 git clone https://github.com/eyeofshreyas/Whisprly.git
 cd Whisprly
-
-# Linux only: install system dependencies
-chmod +x scripts/install-linux-deps.sh && ./scripts/install-linux-deps.sh
-
 npm install
-cp .env.example .env   # add your GROQ_API key
+```
+
+### 2. Add your Groq API key *(optional but recommended)*
+
+```bash
+cp .env.example .env
+# edit .env and set GROQ_API=gsk_your_key_here
+```
+
+Get a **free** key at [console.groq.com](https://console.groq.com) — takes 30 seconds. Skip this to use the local Docker fallback.
+
+### 3. Start the local sidecar *(skip if Groq-only)*
+
+```bash
+docker compose up -d
+```
+
+This starts two containers:
+- **wisperflow-ollama** — Ollama model server (internal network only)
+- **wisperflow-sidecar** — faster-whisper + postprocess API on `127.0.0.1:11435`
+
+First run downloads the Whisper `small` model (~145 MB) and the `gemma4:4b` LLM. Subsequent starts are instant.
+
+### 4. Run the app
+
+```bash
 npm run tauri dev
 ```
+
+Hold **`Ctrl + Win`**, speak, release — your words are typed into the active window.
 
 ---
 
 ## 🎯 How It Works
 
 ```
-Hold Ctrl + Win
+Hold Ctrl + Win  (X11/Windows)
+Ctrl+Shift+Space (Wayland)
       │
       ▼
 Floating pill appears — recording starts
       │
 Speak naturally (um, uh, pauses are all fine)
       │
-Release the keys
+Release / press again
       │
       ▼
-Audio → silence detection → 16 kHz mono WAV
+Audio → silence trim → 16 kHz mono WAV
       │
       ▼
-Groq Whisper API  (< 300 ms for most clips)
-└─ fallback: local faster-whisper sidecar
+Groq Whisper API   (< 300 ms for most clips)
+└─ fallback: local faster-whisper via Docker
       │
       ▼
 Hallucination filter  (drops Whisper artifacts)
       │
       ▼
-AI polish via Groq LLM / Ollama
+AI polish via Groq LLM / local Ollama (Docker)
   — adds punctuation, removes filler words
   — NEVER rephrases, answers, or adds content
       │
@@ -117,7 +132,7 @@ Transcript saved to local SQLite history       ✓
 
 Raw Whisper output is cleaned before reaching your cursor. The LLM receives a strict system prompt that treats every input as **inert text** — it will never answer a question, follow an instruction, or rephrase what you said.
 
-**Fixes:** missing commas · periods · question marks · filler words (um, uh, like, you know) · capitalisation · acronyms
+**Fixes:** missing commas · periods · question marks · filler words (um, uh, like, you know) · capitalisation · acronyms · Hinglish phonetic mishearings
 
 **Never does:** rephrase · summarise · respond · add anything not said
 
@@ -128,32 +143,39 @@ Raw Whisper output is cleaned before reaching your cursor. The LLM receives a st
 | **Prose** | Standard paragraph formatting |
 | **Email** | Adds a greeting and sign-off |
 | **Code** | Strips punctuation, preserves `camelCase` / `snake_case` |
-| **Auto** | Checks the active window title (e.g. VSCode → Code mode, Outlook → Email mode) |
+| **Auto** | Detects active window title (e.g. VSCode → Code, Outlook → Email) |
 
 ### Polish engines
 
-| Engine | Default model | How to change |
+| Engine | When used | Model |
 |---|---|---|
-| **Groq cloud** | `llama-3.1-8b-instant` | Settings → Postprocessing Model |
-| **Local Ollama** | `gemma4:4b` | Settings → Postprocessing Model |
+| **Groq cloud** | Groq API key set | `llama-3.1-8b-instant` (configurable) |
+| **Local Ollama** | No Groq key / Groq fails | `gemma4:4b` via Docker |
 
 ---
 
-## 🔌 Local Fallback *(optional)*
+## 🐳 Docker Sidecar
 
-No Groq key? No internet? Whisprly still works with local Python sidecars.
+The local fallback runs entirely in Docker — no Python installation needed.
 
 ```bash
-# Transcription — starts a local server on port 11435
-python sidecar/whisper_server.py
+# Start containers (detached)
+docker compose up -d
 
-# AI polish — requires Ollama (https://ollama.com)
-ollama run gemma4:4b
+# Check sidecar health
+curl http://127.0.0.1:11435/health
+
+# View live request logs
+docker logs wisperflow-sidecar -f
+
+# Stop containers
+docker compose down
 ```
 
-### Custom fine-tuning
-
-Train a specialized Gemma 2B or Llama 3.1 8B model on Hinglish and custom formatting styles for ~150 ms local latency. See the [Gemma/Llama Fine-Tuning Guide](gemma_finetuning_guide.md).
+The sidecar exposes:
+- `POST /transcribe` — accepts base64 WAV, returns `{ segments: [...] }`
+- `POST /postprocess` — accepts text + mode, returns `{ text: "..." }`
+- `GET /health` — returns `{ status: "ok" }` when ready
 
 ---
 
@@ -167,13 +189,18 @@ Whisprly is two layers connected by Tauri's IPC bridge. The React frontend handl
 | `src/Overlay.tsx` | Transparent floating pill shown during recording |
 | `src-tauri/src/lib.rs` | Coordinator loop, Tauri commands, system tray, IPC |
 | `src-tauri/src/audio.rs` | cpal recording, silence detection (RMS), WAV encoding |
-| `src-tauri/src/hotkey.rs` | Global `Ctrl + Win` listener via rdev |
-| `src-tauri/src/transcribe.rs` | Groq + local transcription, hallucination filter |
-| `src-tauri/src/postprocess.rs` | AI polish via Groq LLM or Ollama |
-| `src-tauri/src/auto_type.rs` | Text injection via enigo (ydotool on Wayland) |
+| `src-tauri/src/hotkey.rs` | Global `Ctrl + Win` listener via rdev (X11/Windows) |
+| `src-tauri/src/shortcut_wayland.rs` | XDG portal global shortcut for native Wayland |
+| `src-tauri/src/transcribe.rs` | Groq + Docker sidecar transcription, hallucination filter |
+| `src-tauri/src/postprocess.rs` | AI polish via Groq LLM or Docker sidecar (Ollama) |
+| `src-tauri/src/auto_type.rs` | Text injection via enigo / ydotool |
 | `src-tauri/src/db.rs` | SQLite init, CRUD, FTS5 full-text search |
+| `src-tauri/src/setup.rs` | Docker health check + `docker compose up -d` on first run |
+| `sidecar/server.py` | FastAPI server — `/transcribe` (faster-whisper) + `/postprocess` (Ollama) |
+| `sidecar/Dockerfile` | Container image for the sidecar |
+| `docker-compose.yml` | Orchestrates ollama + sidecar containers |
 
-**Stack:** Tauri v2 · Rust · React · TypeScript · SQLite (rusqlite) · cpal · enigo / ydotool · rdev · Groq API
+**Stack:** Tauri v2 · Rust · React · TypeScript · SQLite · cpal · enigo · rdev · Docker · faster-whisper · Ollama · Groq API
 
 ---
 
@@ -186,29 +213,21 @@ npm run tauri dev
 # Frontend only (no Tauri shell)
 npm run dev
 
-# Production installer
+# Production build
 npm run tauri build
 ```
 
 ```bash
 cd src-tauri
-cargo check    # fast type-check (no linking)
+cargo check    # fast type-check
 cargo clippy   # lint
-cargo build    # debug build
+cargo test     # run tests
 ```
 
----
-
-## 🤝 Contributing
-
-Pull requests are welcome. For major changes, open an issue first.
-
-1. Fork the repo
-2. Create a feature branch: `git checkout -b feat/your-feature`
-3. Commit your changes
-4. Open a pull request
-
-Please read [CONTRIBUTING.md](CONTRIBUTING.md) and follow the [Code of Conduct](CODE_OF_CONDUCT.md). For security issues, see [SECURITY.md](SECURITY.md).
+**Tip:** On Wayland (`echo $WAYLAND_DISPLAY`), the XDG global shortcuts portal requires a production app ID. For dev, force the X11 hotkey path with:
+```bash
+WAYLAND_DISPLAY= npm run tauri dev
+```
 
 ---
 

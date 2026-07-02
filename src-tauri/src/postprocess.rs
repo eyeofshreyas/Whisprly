@@ -1,4 +1,3 @@
-use std::io::Write;
 use std::time::Duration;
 
 fn system_prompt(mode: &str, custom_vocab: &str, custom_instructions: &str) -> String {
@@ -145,69 +144,36 @@ async fn local_polish(
     raw: &str,
     mode: &str,
     model: &str,
-    python_cmd: &str,
+    _python_cmd: &str,
     custom_vocab: &str,
     custom_instructions: &str,
 ) -> Result<String, String> {
-    let sidecar = sidecar_path();
-    if !std::path::Path::new(&sidecar).exists() {
-        return Ok(raw.to_string());
+    let client = reqwest::Client::new();
+    let body = serde_json::json!({
+        "text": raw,
+        "mode": mode,
+        "model": model,
+        "vocab": custom_vocab,
+        "instructions": custom_instructions
+    });
+
+    let response = client
+        .post("http://127.0.0.1:11435/postprocess")
+        .json(&body)
+        .timeout(Duration::from_secs(30))
+        .send()
+        .await
+        .map_err(|e| format!("Sidecar unreachable: {e}. Is Docker running?"))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body_text = response.text().await.unwrap_or_default();
+        return Err(format!("Postprocess sidecar error {status}: {body_text}"));
     }
-    let raw_owned = raw.to_string();
-    let mode_owned = mode.to_string();
-    let model_owned = model.to_string();
-    let python = python_cmd.to_string();
-    let custom_vocab_owned = custom_vocab.to_string();
-    let custom_instructions_owned = custom_instructions.to_string();
 
-    tokio::task::spawn_blocking(move || {
-        let mut args = vec![sidecar, "--mode".to_string(), mode_owned];
-        if !model_owned.is_empty() {
-            args.push("--model".to_string());
-            args.push(model_owned);
-        }
-        if !custom_vocab_owned.trim().is_empty() {
-            args.push("--custom-vocab".to_string());
-            args.push(custom_vocab_owned);
-        }
-        if !custom_instructions_owned.trim().is_empty() {
-            args.push("--custom-instructions".to_string());
-            args.push(custom_instructions_owned);
-        }
-
-        let mut child = std::process::Command::new(&python)
-            .args(&args)
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .map_err(|e| e.to_string())?;
-
-        if let Some(mut stdin) = child.stdin.take() {
-            stdin.write_all(raw_owned.as_bytes()).map_err(|e| e.to_string())?;
-        }
-
-        let output = child.wait_with_output().map_err(|e| e.to_string())?;
-
-        if !output.status.success() {
-            let err = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("sidecar error: {err}"));
-        }
-
-        let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        Ok(if text.is_empty() { raw_owned } else { text })
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
-fn sidecar_path() -> String {
-    std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.join("sidecar").join("postprocess_sidecar.py")))
-        .unwrap_or_else(|| std::path::PathBuf::from("sidecar/postprocess_sidecar.py"))
-        .to_string_lossy()
-        .to_string()
+    let json: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
+    let text = json["text"].as_str().unwrap_or(raw).trim().to_string();
+    Ok(if text.is_empty() { raw.to_string() } else { text })
 }
 
 fn strip_llm_decorations(text: &str) -> String {
