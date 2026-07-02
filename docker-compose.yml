@@ -2,8 +2,6 @@ services:
   ollama:
     image: ollama/ollama
     container_name: wisperflow-ollama
-    ports:
-      - "127.0.0.1:11434:11434"
     volumes:
       - wisperflow-ollama:/root/.ollama
     networks:
@@ -17,6 +15,8 @@ services:
       - "127.0.0.1:11435:11435"
     environment:
       - OLLAMA_URL=http://ollama:11434
+    volumes:
+      - wisperflow-cache:/root/.cache/huggingface
     networks:
       - wisperflow
     depends_on:
