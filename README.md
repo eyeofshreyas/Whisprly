@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="src/assets/logo.svg" width="100" alt="Whisprly" />
+  <img src="src/assets/logo.png" width="100" alt="Whisprly" />
   <h1>Whisprly</h1>
   <p><strong>Hold a key. Speak. Release. Your words appear — polished and typed — right where you left off.</strong></p>
 
