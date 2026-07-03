@@ -181,26 +181,108 @@ The sidecar exposes:
 
 ## 🏗 Architecture
 
-Whisprly is two layers connected by Tauri's IPC bridge. The React frontend handles all UI state; the Rust backend handles audio, transcription, text injection, and persistence.
+Two layers connected by Tauri's IPC bridge. The React frontend handles all UI state; the Rust backend owns audio, transcription, text injection, and persistence. A second lightweight WebView renders the floating overlay — a separate window that listens to the same `"status"` events.
+
+### System diagram
+
+```mermaid
+graph TD
+  subgraph FE ["Frontend (WebView — React + TypeScript)"]
+    APP["App.tsx\nDashboard & history"]
+    OVL["Overlay.tsx\nFloating pill"]
+  end
+
+  subgraph BE ["Backend (Rust — Tauri v2)"]
+    LIB["lib.rs · coordinator\nAppState · Tauri commands · tray"]
+    HK["hotkey.rs\nevdev · Win32 hook"]
+    WL["shortcut_wayland.rs\nXDG portal (ashpd)"]
+    AUDIO["audio.rs\ncpal capture · DSP · WAV"]
+    TR["transcribe.rs\nWhisper · hallucination filter"]
+    PP["postprocess.rs\nLLM polish · strip decorations"]
+    PLAT["platform/\nActive window title"]
+    AT["auto_type.rs\nydotool · xdotool · enigo"]
+    DB["db.rs\nSQLite + FTS5"]
+    SETUP["setup.rs\nDocker health · compose up"]
+    OAUTH["oauth.rs\nGoogle OAuth2 PKCE"]
+  end
+
+  subgraph EXT ["External services / OS"]
+    GROQ_W["Groq Whisper API"]
+    GROQ_L["Groq Chat API"]
+    SIDECAR["Docker Sidecar :11435\nfaster-whisper + Ollama"]
+    FOCUSED["Focused window\n(OS compositor)"]
+  end
+
+  HK -->|"HotkeyEvent"| LIB
+  WL -->|"HotkeyEvent"| LIB
+  LIB -->|"start / stop"| AUDIO
+  AUDIO -->|"Vec&lt;f32&gt; → WAV"| LIB
+  LIB --> TR
+  TR -->|primary| GROQ_W
+  TR -->|fallback| SIDECAR
+  TR -->|raw text| LIB
+  LIB --> PLAT
+  PLAT -->|window title| LIB
+  LIB --> PP
+  PP -->|primary| GROQ_L
+  PP -->|fallback| SIDECAR
+  PP -->|polished text| LIB
+  LIB --> AT
+  AT -->|keystrokes| FOCUSED
+  LIB --> DB
+  DB -->|TranscriptEntry| LIB
+  LIB -->|"status event"| APP
+  LIB -->|"status event"| OVL
+  LIB -->|"transcript event"| APP
+  LIB -->|"setup_progress event"| APP
+  APP -->|"invoke commands"| LIB
+  SETUP -.->|"on startup"| SIDECAR
+  OAUTH -.->|"PKCE flow"| LIB
+```
+
+### Modules
 
 | File | Role |
 |---|---|
-| `src/App.tsx` | React UI — all state via `useState`, single entry point |
-| `src/Overlay.tsx` | Transparent floating pill shown during recording |
-| `src-tauri/src/lib.rs` | Coordinator loop, Tauri commands, system tray, IPC |
-| `src-tauri/src/audio.rs` | cpal recording, silence detection (RMS), WAV encoding |
-| `src-tauri/src/hotkey.rs` | Global `Ctrl + Win` listener via rdev (X11/Windows) |
-| `src-tauri/src/shortcut_wayland.rs` | XDG portal global shortcut for native Wayland |
-| `src-tauri/src/transcribe.rs` | Groq + Docker sidecar transcription, hallucination filter |
-| `src-tauri/src/postprocess.rs` | AI polish via Groq LLM or Docker sidecar (Ollama) |
-| `src-tauri/src/auto_type.rs` | Text injection via enigo / ydotool |
-| `src-tauri/src/db.rs` | SQLite init, CRUD, FTS5 full-text search |
-| `src-tauri/src/setup.rs` | Docker health check + `docker compose up -d` on first run |
-| `sidecar/server.py` | FastAPI server — `/transcribe` (faster-whisper) + `/postprocess` (Ollama) |
-| `sidecar/Dockerfile` | Container image for the sidecar |
-| `docker-compose.yml` | Orchestrates ollama + sidecar containers |
+| `src/main.tsx` | Entry — routes to `<App>` or `<Overlay>` via `?window=overlay` |
+| `src/App.tsx` | Dashboard: all state (`useState`), event listeners, command invocations |
+| `src/Overlay.tsx` | Floating pill WebView — waveform / spinner driven by `"status"` events |
+| `src-tauri/src/lib.rs` | Coordinator loop, `AppState`, Tauri commands, system tray, IPC bridge |
+| `src-tauri/src/audio.rs` | cpal capture, mono mix, 16 kHz resample, RMS silence trim / gate |
+| `src-tauri/src/hotkey.rs` | evdev (Linux) + Win32 low-level hook — emits `HotkeyEvent` to coordinator |
+| `src-tauri/src/shortcut_wayland.rs` | XDG global shortcuts portal (ashpd) — Wayland toggle shortcut |
+| `src-tauri/src/transcribe.rs` | Groq Whisper API (primary) + Docker sidecar (fallback), hallucination filter |
+| `src-tauri/src/postprocess.rs` | Groq Chat API (primary) + Docker Ollama (fallback), polish + strip decorations |
+| `src-tauri/src/auto_type.rs` | Text injection: ydotool (Wayland) → xdotool (X11) → enigo → clipboard fallback |
+| `src-tauri/src/platform/` | Active window title: xdotool/xprop (Linux), GetForegroundWindow (Windows) |
+| `src-tauri/src/db.rs` | SQLite init, transcript CRUD, FTS5 full-text search, settings KV |
+| `src-tauri/src/setup.rs` | Docker compose up, sidecar + Ollama health polling, model pull on first run |
+| `src-tauri/src/oauth.rs` | Google OAuth2 PKCE, local callback server on :9004 |
+| `sidecar/server.py` | FastAPI: `/transcribe` (faster-whisper) · `/postprocess` (Ollama) · `/health` |
+| `docker-compose.yml` | Orchestrates `wisperflow-ollama` + `wisperflow-sidecar` |
 
-**Stack:** Tauri v2 · Rust · React · TypeScript · SQLite · cpal · enigo · rdev · Docker · faster-whisper · Ollama · Groq API
+### IPC reference
+
+**Events — Rust → Frontend**
+
+| Event | Payload | Listeners |
+|---|---|---|
+| `"status"` | `{ status, message? }` | App.tsx, Overlay.tsx |
+| `"transcript"` | `TranscriptEntry` | App.tsx |
+| `"setup_progress"` | `{ stage, percent, message }` | App.tsx |
+
+**Commands — Frontend → Rust (via `invoke`)**
+
+| Command | Purpose |
+|---|---|
+| `get_settings` / `save_settings` | Groq key, language, model, vocab, custom instructions |
+| `get_transcript_log` / `search_transcripts` | History load + FTS5 phrase search |
+| `delete_transcript` / `update_transcript` / `clear_all_db_transcripts` | CRUD |
+| `get_output_mode` / `set_output_mode` | Prose / Email / Code / Auto |
+| `trigger_auto_type` | Re-inject any transcript into the last focused window |
+| `stop_recording` | Programmatic pipeline stop (Overlay click, Done button) |
+
+**Stack:** Tauri v2 · Rust · React · TypeScript · SQLite · cpal · hound · enigo · evdev · ashpd · arboard · Docker · faster-whisper · Ollama · Groq API
 
 ---
 
