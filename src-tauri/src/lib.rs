@@ -595,11 +595,16 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            if let Some(w) = app.get_webview_window("main") {
-                if let Ok(icon) = tauri::image::Image::from_bytes(include_bytes!("../icons/128x128.png")) {
-                    let _ = w.set_icon(icon);
+            // Defer icon setting — GTK widget isn't ready at setup time on Linux.
+            let ah2 = app_handle.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                if let Some(w) = ah2.get_webview_window("main") {
+                    if let Ok(icon) = tauri::image::Image::from_bytes(include_bytes!("../icons/128x128.png")) {
+                        let _ = w.set_icon(icon);
+                    }
                 }
-            }
+            });
 
             // ── Close-to-tray: intercept CloseRequested on main window ──
             let ah = app_handle.clone();
