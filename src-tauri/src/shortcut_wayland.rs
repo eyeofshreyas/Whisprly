@@ -4,11 +4,19 @@ use futures_lite::StreamExt;
 pub async fn register(tx: tokio::sync::mpsc::UnboundedSender<crate::HotkeyEvent>) {
     let proxy = match GlobalShortcuts::new().await {
         Ok(p) => p,
-        Err(e) => { eprintln!("[wayland shortcuts] portal unavailable: {e}"); return; }
+        Err(e) => {
+            eprintln!("[wayland shortcuts] portal unavailable: {e}");
+            fallback_rdev(tx);
+            return;
+        }
     };
     let session = match proxy.create_session().await {
         Ok(s) => s,
-        Err(e) => { eprintln!("[wayland shortcuts] create_session failed: {e}"); return; }
+        Err(e) => {
+            eprintln!("[wayland shortcuts] create_session failed: {e}");
+            fallback_rdev(tx);
+            return;
+        }
     };
     if let Err(e) = proxy.bind_shortcuts(
         &session,
@@ -34,4 +42,9 @@ pub async fn register(tx: tokio::sync::mpsc::UnboundedSender<crate::HotkeyEvent>
         }
         recording = !recording;
     }
+}
+
+fn fallback_rdev(tx: tokio::sync::mpsc::UnboundedSender<crate::HotkeyEvent>) {
+    eprintln!("[wayland shortcuts] falling back to rdev (Ctrl+Win hold-to-record)");
+    std::thread::spawn(move || crate::hotkey::start_listener(tx));
 }
