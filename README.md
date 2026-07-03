@@ -186,58 +186,38 @@ Two layers connected by Tauri's IPC bridge. The React frontend handles all UI st
 ### System diagram
 
 ```mermaid
-graph TD
-  subgraph FE ["Frontend (WebView — React + TypeScript)"]
-    APP["App.tsx\nDashboard & history"]
-    OVL["Overlay.tsx\nFloating pill"]
-  end
+flowchart TD
+    subgraph ui ["Frontend — React WebViews"]
+        direction LR
+        APP["App.tsx\ndashboard · history · settings"]
+        OVL["Overlay.tsx\nfloating recording pill"]
+    end
 
-  subgraph BE ["Backend (Rust — Tauri v2)"]
-    LIB["lib.rs · coordinator\nAppState · Tauri commands · tray"]
-    HK["hotkey.rs\nevdev · Win32 hook"]
-    WL["shortcut_wayland.rs\nXDG portal (ashpd)"]
-    AUDIO["audio.rs\ncpal capture · DSP · WAV"]
-    TR["transcribe.rs\nWhisper · hallucination filter"]
-    PP["postprocess.rs\nLLM polish · strip decorations"]
-    PLAT["platform/\nActive window title"]
-    AT["auto_type.rs\nydotool · xdotool · enigo"]
+    COORD["lib.rs — Coordinator\nAppState · Tauri commands · tray"]
+    HK["Hotkey listener\nCtrl+Win · Ctrl+Shift+Space"]
+
+    subgraph pipe ["Recording pipeline — Rust"]
+        direction LR
+        AUDIO["audio.rs\ncpal · 16 kHz WAV"] --> TR["transcribe.rs\nWhisper + filter"] --> PP["postprocess.rs\nLLM polish"]
+    end
+
+    AT["auto_type.rs\nydotool → xdotool → enigo"]
     DB["db.rs\nSQLite + FTS5"]
-    SETUP["setup.rs\nDocker health · compose up"]
-    OAUTH["oauth.rs\nGoogle OAuth2 PKCE"]
-  end
 
-  subgraph EXT ["External services / OS"]
-    GROQ_W["Groq Whisper API"]
-    GROQ_L["Groq Chat API"]
-    SIDECAR["Docker Sidecar :11435\nfaster-whisper + Ollama"]
-    FOCUSED["Focused window\n(OS compositor)"]
-  end
+    subgraph api ["External APIs — primary → fallback"]
+        GROQ["Groq\nWhisper + Chat"]
+        DOCKER["Docker Sidecar :11435\nfaster-whisper + Ollama"]
+    end
 
-  HK -->|"HotkeyEvent"| LIB
-  WL -->|"HotkeyEvent"| LIB
-  LIB -->|"start / stop"| AUDIO
-  AUDIO -->|"Vec&lt;f32&gt; → WAV"| LIB
-  LIB --> TR
-  TR -->|primary| GROQ_W
-  TR -->|fallback| SIDECAR
-  TR -->|raw text| LIB
-  LIB --> PLAT
-  PLAT -->|window title| LIB
-  LIB --> PP
-  PP -->|primary| GROQ_L
-  PP -->|fallback| SIDECAR
-  PP -->|polished text| LIB
-  LIB --> AT
-  AT -->|keystrokes| FOCUSED
-  LIB --> DB
-  DB -->|TranscriptEntry| LIB
-  LIB -->|"status event"| APP
-  LIB -->|"status event"| OVL
-  LIB -->|"transcript event"| APP
-  LIB -->|"setup_progress event"| APP
-  APP -->|"invoke commands"| LIB
-  SETUP -.->|"on startup"| SIDECAR
-  OAUTH -.->|"PKCE flow"| LIB
+    WIN(["Active window"])
+
+    ui     <-->|"events / invoke"| COORD
+    HK      -->|HotkeyEvent|       COORD
+    COORD   -->|"start / stop"|    pipe
+    PP      --> AT & DB
+    TR & PP -.->|primary|          GROQ
+    TR & PP -.->|fallback|         DOCKER
+    AT      -->|keystrokes|        WIN
 ```
 
 ### Modules
