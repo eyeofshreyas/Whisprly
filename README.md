@@ -211,13 +211,13 @@ flowchart TD
 
     WIN(["Active window"])
 
-    ui     <-->|"events / invoke"| COORD
-    HK      -->|HotkeyEvent|       COORD
-    COORD   -->|"start / stop"|    pipe
-    PP      --> AT & DB
-    TR & PP -.->|primary|          GROQ
-    TR & PP -.->|fallback|         DOCKER
-    AT      -->|keystrokes|        WIN
+    ui <-->|"events / invoke"| COORD
+    HK -->|HotkeyEvent| COORD
+    COORD -->|"start / stop"| pipe
+    PP --> AT & DB
+    TR & PP -.->|primary| GROQ
+    TR & PP -.->|fallback| DOCKER
+    AT -->|keystrokes| WIN
 ```
 
 ### Modules
