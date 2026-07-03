@@ -597,8 +597,8 @@ pub fn run() {
 
             // Defer icon setting — GTK widget isn't ready at setup time on Linux.
             let ah2 = app_handle.clone();
-            tokio::spawn(async move {
-                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(500));
                 if let Some(w) = ah2.get_webview_window("main") {
                     if let Ok(icon) = tauri::image::Image::from_bytes(include_bytes!("../icons/128x128.png")) {
                         let _ = w.set_icon(icon);
