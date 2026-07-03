@@ -595,11 +595,9 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            // Set the window icon explicitly so Linux dock/taskbar picks it up.
-            // The tray uses default_window_icon() but the dock reads the window's own icon.
             if let Some(w) = app.get_webview_window("main") {
-                if let Some(icon) = app.default_window_icon() {
-                    let _ = w.set_icon(icon.clone());
+                if let Ok(icon) = tauri::image::Image::from_bytes(include_bytes!("../icons/128x128.png")) {
+                    let _ = w.set_icon(icon);
                 }
             }
 
