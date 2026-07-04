@@ -20,11 +20,12 @@ pub async fn register(tx: tokio::sync::mpsc::UnboundedSender<crate::HotkeyEvent>
     };
     if let Err(e) = proxy.bind_shortcuts(
         &session,
-        &[NewShortcut::new("record", "Toggle Whisprly recording")
-            .preferred_trigger("CTRL+SHIFT+Space")],
+        &[NewShortcut::new("toggle-recording", "Toggle Whisprly recording")
+            .preferred_trigger("CTRL+Super")],
         None,
     ).await {
         eprintln!("[wayland shortcuts] bind_shortcuts failed: {e}");
+        fallback_rdev(tx);
         return;
     }
 
