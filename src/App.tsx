@@ -300,7 +300,7 @@ function activeDays(entries: TranscriptEntry[]) {
 // ── Nav data ──────────────────────────────────────────────────────────────────
 
 type SetupProgress = {
-  stage: "checking" | "installing_winget" | "installing_ollama" | "pulling_model" | "done" | "error";
+  stage: "checking" | "starting_containers" | "waiting_sidecar" | "waiting_ollama" | "pulling_model" | "done" | "error";
   percent: number;
   message: string;
 };
