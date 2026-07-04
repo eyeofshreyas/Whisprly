@@ -4,7 +4,7 @@
   <p><strong>Hold a key. Speak. Release. Your words appear — polished and typed — right where you left off.</strong></p>
 
   <p>
-    <img src="https://img.shields.io/badge/version-0.2.0-brightgreen?style=flat-square" />
+    <img src="https://img.shields.io/badge/version-0.3.0-brightgreen?style=flat-square" />
     <img src="https://img.shields.io/badge/platform-Windows%20|%20Linux-blue?style=flat-square&logo=windows" />
     <img src="https://img.shields.io/badge/built%20with-Tauri%20v2-24C8DB?style=flat-square&logo=tauri" />
     <img src="https://img.shields.io/badge/backend-Rust-orange?style=flat-square&logo=rust" />
@@ -26,6 +26,17 @@
 **Whisprly** is a cross-platform (Windows & Linux Wayland/X11) desktop dictation app that turns speech into polished, auto-typed text in any app — browser, IDE, Slack, Word, terminal — in under a second. No clicking. No copy-pasting. Just press a hotkey, speak naturally, and let go.
 
 > Built with Tauri v2 (Rust backend) + React frontend. Transcription via Groq's `whisper-large-v3-turbo` with a local [faster-whisper](https://github.com/SYSTRAN/faster-whisper) fallback served via Docker. AI cleanup via Groq LLMs or a local Ollama model. Everything private by default — all transcripts stay on your machine in SQLite.
+
+### How it compares
+
+| | Whisprly | Wispr Flow |
+|---|---|---|
+| Source | Open source (MIT) | Closed source |
+| Price | Free | Subscription |
+| Linux support | Yes (Wayland + X11) | No |
+| Transcript storage | Local SQLite, private by default | Cloud |
+| Offline fallback | Yes (local faster-whisper + Ollama via Docker) | No |
+| Customization | Fork it, change anything | Fixed feature set |
 
 ---
 
