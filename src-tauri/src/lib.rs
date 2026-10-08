@@ -18,8 +18,6 @@ mod platform;
 mod postprocess;
 mod setup;
 mod transcribe;
-#[cfg(target_os = "linux")]
-mod shortcut_wayland;
 
 pub enum HotkeyEvent {
     Start,
@@ -538,13 +536,12 @@ pub fn run() {
 
             #[cfg(target_os = "linux")]
             {
-                // On native Wayland use the XDG global-shortcuts portal (no `input` group needed).
-                // On X11 / XWayland fall back to the evdev listener.
-                if !std::env::var("WAYLAND_DISPLAY").unwrap_or_default().is_empty() {
-                    tauri::async_runtime::spawn(shortcut_wayland::register(tx));
-                } else {
-                    std::thread::spawn(move || hotkey::start_listener(tx));
-                }
+                // The XDG global-shortcuts portal depends on the compositor routing the
+                // trigger to it uncontested. Compositors that bind SUPER themselves
+                // (e.g. Hyprland tap-for-launcher, SUPER+dir window focus) can swallow
+                // the modifier before the portal ever sees it. evdev reads the raw
+                // keyboard device instead, so it fires regardless of compositor binds.
+                std::thread::spawn(move || hotkey::start_listener(tx));
             }
             #[cfg(target_os = "windows")]
             std::thread::spawn(move || hotkey::start_listener(tx));

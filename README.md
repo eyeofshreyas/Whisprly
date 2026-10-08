@@ -44,7 +44,7 @@
 
 | | |
 |---|---|
-| 🎙 **One-hotkey dictation** | Hold `Ctrl + Win` to record, release to transcribe (X11/Windows) · `Ctrl+Shift+Space` toggle on Wayland |
+| 🎙 **One-hotkey dictation** | Hold `Ctrl + Win` to record, release to transcribe |
 | ✨ **AI polish** | Fixes punctuation, removes filler words, corrects capitalisation — never rephrases |
 | 🔄 **4 output modes** | Prose · Email · Code · **Auto** (detects active window — VSCode, Outlook, etc.) |
 | 🌐 **12 languages** | Auto-detect or lock to English, Hindi, Spanish, French, Japanese, Arabic, and more |
@@ -107,8 +107,7 @@ Hold **`Ctrl + Win`**, speak, release — your words are typed into the active w
 ## 🎯 How It Works
 
 ```
-Hold Ctrl + Win  (X11/Windows)
-Ctrl+Shift+Space (Wayland)
+Hold Ctrl + Win
       │
       ▼
 Floating pill appears — recording starts
@@ -205,7 +204,7 @@ flowchart TD
     end
 
     COORD["lib.rs — Coordinator\nAppState · Tauri commands · tray"]
-    HK["Hotkey listener\nCtrl+Win · Ctrl+Shift+Space"]
+    HK["Hotkey listener\nCtrl+Win"]
 
     subgraph pipe ["Recording pipeline — Rust"]
         direction LR
@@ -240,8 +239,7 @@ flowchart TD
 | `src/Overlay.tsx` | Floating pill WebView — waveform / spinner driven by `"status"` events |
 | `src-tauri/src/lib.rs` | Coordinator loop, `AppState`, Tauri commands, system tray, IPC bridge |
 | `src-tauri/src/audio.rs` | cpal capture, mono mix, 16 kHz resample, RMS silence trim / gate |
-| `src-tauri/src/hotkey.rs` | evdev (Linux) + Win32 low-level hook — emits `HotkeyEvent` to coordinator |
-| `src-tauri/src/shortcut_wayland.rs` | XDG global shortcuts portal (ashpd) — Wayland toggle shortcut |
+| `src-tauri/src/hotkey.rs` | evdev (Linux, all compositors) + Win32 low-level hook — emits `HotkeyEvent` to coordinator |
 | `src-tauri/src/transcribe.rs` | Groq Whisper API (primary) + Docker sidecar (fallback), hallucination filter |
 | `src-tauri/src/postprocess.rs` | Groq Chat API (primary) + Docker Ollama (fallback), polish + strip decorations |
 | `src-tauri/src/auto_type.rs` | Text injection: ydotool (Wayland) → xdotool (X11) → enigo → clipboard fallback |
@@ -273,7 +271,7 @@ flowchart TD
 | `trigger_auto_type` | Re-inject any transcript into the last focused window |
 | `stop_recording` | Programmatic pipeline stop (Overlay click, Done button) |
 
-**Stack:** Tauri v2 · Rust · React · TypeScript · SQLite · cpal · hound · enigo · evdev · ashpd · arboard · Docker · faster-whisper · Ollama · Groq API
+**Stack:** Tauri v2 · Rust · React · TypeScript · SQLite · cpal · hound · enigo · evdev · arboard · Docker · faster-whisper · Ollama · Groq API
 
 ---
 

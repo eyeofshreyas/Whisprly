@@ -13,8 +13,6 @@ tauri-build = { version = "2", features = [] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 evdev = "0.12"
-ashpd = "0.10"
-futures-lite = "2"
 arboard = "3"
 enigo = { version = "0.2", features = ["x11rb", "wayland"] }
 
